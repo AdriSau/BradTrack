@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6f1">
+  <title>BradTrack | Patrimonio</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="BradTrack, inicio">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span>BradTrack</span>
+    </a>
+    <div class="portfolio-picker">
+      <select class="portfolio-select" id="portfolio-select" aria-label="Portfolio activo"></select>
+      <button class="icon-button portfolio-add" id="create-portfolio" type="button" aria-label="Crear portfolio" title="Crear portfolio">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <div class="top-actions">
+      <span class="local-status"><span class="status-dot"></span>Solo en este dispositivo</span>
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="Activar modo oscuro" title="Cambiar tema">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.5 8.5 0 1 0 20.2 15.4Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <nav class="section-nav" aria-label="Secciones">
+      <a class="nav-link active" href="#patrimonio">Patrimonio</a>
+      <a class="nav-link" href="#posiciones">Posiciones</a>
+      <a class="nav-link" href="#operaciones">Operaciones</a>
+    </nav>
+
+    <section class="intro-row" id="patrimonio">
+      <div>
+        <p class="eyebrow">SEGUIMIENTO PERSONAL</p>
+        <h1>Tu patrimonio,<br><span>en perspectiva.</span></h1>
+        <p class="as-of" id="as-of">Sin operaciones registradas</p>
+      </div>
+      <div class="primary-actions">
+        <button class="button button-quiet" id="import-transactions" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
+          Importar CSV
+        </button>
+        <button class="button button-primary" id="add-transaction" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Nueva operacion
+        </button>
+      </div>
+    </section>
+
+    <section class="net-worth-block" aria-label="Resumen del patrimonio">
+      <div class="net-worth-main">
+        <p class="metric-label">VALOR ACTUAL DE LA CARTERA</p>
+        <p class="net-worth-value" id="total-value">0,00&nbsp;€</p>
+        <p class="net-worth-subline"><span id="gain-value">0,00&nbsp;€</span><span class="separator">/</span><span id="gain-percent">0,00&nbsp;%</span><span class="subline-caption">sobre el capital neto aportado</span></p>
+      </div>
+      <div class="target-block">
+        <div class="target-heading"><span>Objetivo de patrimonio</span><button class="text-button" id="target-edit" type="button">Editar</button></div>
+        <div class="progress-track"><span id="target-progress"></span></div>
+        <div class="target-caption"><span id="target-percent">Define un objetivo</span><span id="target-remaining"></span></div>
+      </div>
+    </section>
+
+    <section class="metric-grid" aria-label="Indicadores">
+      <article class="metric-card"><span class="metric-label">CAPITAL NETO APORTADO</span><strong id="invested-value">0,00&nbsp;€</strong><span class="metric-foot" id="transaction-count">0 operaciones</span></article>
+      <article class="metric-card"><span class="metric-label">RESULTADO NETO</span><strong id="unrealized-value">0,00&nbsp;€</strong><span class="metric-foot">Valor actual menos capital neto</span></article>
+      <article class="metric-card"><span class="metric-label">POSICIONES ACTIVAS</span><strong id="position-count">0</strong><span class="metric-foot">Activos en cartera</span></article>
+      <article class="metric-card accent-card"><span class="metric-label">ULTIMA ACTUALIZACION</span><strong id="last-update">Sin datos</strong><span class="metric-foot">Precios importados localmente</span></article>
+    </section>
+
+    <section class="panel chart-panel" aria-labelledby="chart-title">
+      <div class="panel-heading chart-heading">
+        <div><p class="eyebrow">EVOLUCION</p><h2 id="chart-title">Capital a lo largo del tiempo</h2></div>
+        <div class="chart-controls"><button class="button button-quiet history-button" id="import-history" type="button">Importar historicos</button>
+          <div class="range-control" role="group" aria-label="Rango del grafico">
+            <button class="range-button active" data-range="all" type="button">Todo</button>
+            <button class="range-button" data-range="year" type="button">1A</button>
+            <button class="range-button" data-range="month" type="button">1M</button>
+          </div>
+        </div>
+      </div>
+      <p class="chart-note" id="chart-note">Importa historicos de precios para ver la valoracion diaria. Mientras tanto, mostramos el capital neto aportado.</p>
+      <div class="chart-wrap" id="chart-wrap">
+        <svg id="portfolio-chart" viewBox="0 0 1000 280" role="img" aria-label="Grafico de evolucion del patrimonio"></svg>
+        <div class="chart-empty" id="chart-empty">Anade una operacion para empezar a seguir tu cartera.</div>
+      </div>
+      <div class="chart-legend"><span class="legend-mark"></span><span id="legend-label">Capital neto aportado</span></div>
+    </section>
+
+    <section class="content-grid">
+      <section class="panel" id="posiciones" aria-labelledby="positions-title">
+        <div class="panel-heading"><div><p class="eyebrow">CARTERA</p><h2 id="positions-title">Posiciones</h2></div><span class="count-pill" id="positions-badge">0 activos</span></div>
+        <div class="table-scroll"><table><thead><tr><th>Activo</th><th>Unidades</th><th>Precio</th><th>Valor actual</th><th>Resultado</th><th></th></tr></thead><tbody id="positions-body"></tbody></table></div>
+        <p class="table-empty" id="positions-empty">Tus activos apareceran aqui al registrar o importar operaciones.</p>
+      </section>
+      <section class="panel recent-panel" id="operaciones" aria-labelledby="transactions-title">
+        <div class="panel-heading"><div><p class="eyebrow">ACTIVIDAD</p><h2 id="transactions-title">Ultimas operaciones</h2></div><button class="text-button" id="show-all-transactions" type="button">Nueva</button></div>
+        <div class="transaction-list" id="transaction-list"></div>
+        <p class="table-empty" id="transactions-empty">Todavia no hay operaciones.</p>
+      </section>
+    </section>
+
+    <footer class="disclaimer">Herramienta de seguimiento personal. Los precios dependen de los archivos que importes y pueden no estar actualizados.</footer>
+  </main>
+
+  <input id="transaction-file" type="file" accept=".csv,text/csv" hidden>
+  <input id="history-files" type="file" accept=".csv,text/csv" multiple hidden>
+
+  <dialog id="portfolio-dialog" class="dialog compact-dialog">
+    <form id="portfolio-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">CARTERA</p><h2>Nuevo portfolio</h2></div><button class="icon-button portfolio-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <label>Alias del portfolio<input name="alias" type="text" maxlength="48" required autocomplete="off" placeholder="Ej. Inversiones a largo plazo"></label>
+      <p class="form-error" id="portfolio-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button button-quiet portfolio-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Crear portfolio</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog" class="dialog compact-dialog">
+    <form id="import-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">IMPORTACION</p><h2 id="import-title">Importar CSV</h2></div><button class="icon-button import-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <p class="import-file-name" id="import-file-name"></p>
+      <label>Asociar a<select id="import-portfolio-target" required></select></label>
+      <label class="import-alias-field" id="import-alias-field" hidden>Alias del nuevo portfolio<input id="import-portfolio-alias" type="text" maxlength="48" autocomplete="off" placeholder="Ej. Cartera familiar"></label>
+      <p class="form-error" id="import-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button button-quiet import-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Importar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="transaction-dialog" class="dialog">
+    <form id="transaction-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">CARTERA</p><h2>Nueva operacion</h2></div><button class="icon-button dialog-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <div class="form-grid">
+        <label>Tipo<select name="type" required><option value="BUY">Compra</option><option value="SELL">Venta</option></select></label>
+        <label>Fecha<input name="date" type="date" required></label>
+        <label>Simbolo<input name="symbol" type="text" placeholder="Ej. MSFT" required maxlength="24" autocomplete="off"></label>
+        <label>Unidades<input name="quantity" type="number" min="0.00000001" step="any" required></label>
+        <label>Precio por unidad<input name="price" type="number" min="0" step="any" required></label>
+        <label>Comision<input name="commission" type="number" min="0" step="any" value="0"></label>
+        <label class="full-field">Precio actual (opcional)<input name="currentPrice" type="number" min="0" step="any" placeholder="Usa el precio de la operacion si lo dejas vacio"></label>
+      </div>
+      <p class="form-error" id="form-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button button-quiet" id="cancel-transaction" type="button">Cancelar</button><button class="button button-primary" type="submit">Guardar operacion</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="quote-dialog" class="dialog compact-dialog">
+    <form id="quote-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">COTIZACION</p><h2>Actualizar precio</h2></div><button class="icon-button quote-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <input name="symbol" type="hidden">
+      <label>Precio actual<input name="price" type="number" min="0" step="any" required></label>
+      <div class="dialog-actions"><button class="button button-quiet quote-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Actualizar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="target-dialog" class="dialog compact-dialog">
+    <form id="target-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">OBJETIVO</p><h2>Meta de patrimonio</h2></div><button class="icon-button target-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <label>Objetivo en euros<input name="target" type="number" min="0" step="100" required></label>
+      <div class="dialog-actions"><button class="button button-quiet target-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Guardar meta</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
