@@ -90,7 +90,7 @@ try {
                 $newDirectory = Join-Path $portfolioDirectory $portfolioId
                 New-Item -ItemType Directory -Path $newDirectory -Force | Out-Null
                 $newDataFile = Join-Path $newDirectory 'portfolio.json'
-                [System.IO.File]::WriteAllText($newDataFile, '{"transactions":[],"quotes":{},"history":{},"settings":{"target":0}}', (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+                [System.IO.File]::WriteAllText($newDataFile, '{"transactions":[],"quotes":{},"history":{},"settings":{"target":100000}}', (New-Object System.Text.UTF8Encoding -ArgumentList $false))
                 $index.portfolios = @($index.portfolios) + @([pscustomobject]@{ id = $portfolioId; alias = $alias })
                 $temporaryIndexFile = "$portfolioIndexFile.tmp"
                 [System.IO.File]::WriteAllText($temporaryIndexFile, ($index | ConvertTo-Json -Depth 8 -Compress), (New-Object System.Text.UTF8Encoding -ArgumentList $false))

@@ -1,7 +1,10 @@
-const emptyPortfolio = () => ({ transactions: [], quotes: {}, history: {}, settings: { target: 0 } });
+const DEFAULT_TARGET = 100000;
+const emptyPortfolio = () => ({ transactions: [], quotes: {}, history: {}, settings: { target: DEFAULT_TARGET } });
 let portfolio = emptyPortfolio();
 let portfolios = [];
+let portfolioSnapshots = {};
 let activePortfolioId = '';
+let dashboardFilterId = 'all';
 let pendingImport = null;
 let activeRange = 'all';
 let toastTimer;
@@ -32,16 +35,26 @@ async function archiveCsv(file, category) {
   return response.json();
 }
 
-function renderPortfolioOptions() {
-  const select = byId('portfolio-select');
+function populatePortfolioSelect(selectId, selectedId = activePortfolioId) {
+  const select = byId(selectId);
   select.replaceChildren();
-  for (const item of portfolios) {
-    const option = document.createElement('option');
-    option.value = item.id;
-    option.textContent = item.alias;
-    option.selected = item.id === activePortfolioId;
-    select.append(option);
-  }
+  for (const item of portfolios) select.add(new Option(item.alias, item.id));
+  if (portfolios.some((item) => item.id === selectedId)) select.value = selectedId;
+}
+
+function renderDashboardFilterOptions() {
+  const select = byId('dashboard-filter');
+  select.replaceChildren(new Option('Todos los portfolios', 'all'));
+  for (const item of portfolios) select.add(new Option(item.alias, item.id));
+  if (!portfolios.some((item) => item.id === dashboardFilterId) && dashboardFilterId !== 'all') dashboardFilterId = 'all';
+  select.value = dashboardFilterId;
+}
+
+function getDashboardRecords() {
+  return portfolios.filter((item) => dashboardFilterId === 'all' || item.id === dashboardFilterId).map((item) => ({
+    ...item,
+    data: portfolioSnapshots[item.id] || (item.id === activePortfolioId ? portfolio : emptyPortfolio())
+  }));
 }
 
 async function loadPortfolio(portfolioId) {
@@ -50,8 +63,11 @@ async function loadPortfolio(portfolioId) {
   const stored = await response.json();
   activePortfolioId = portfolioId;
   portfolio = { ...emptyPortfolio(), ...stored, settings: { target: 0, ...stored.settings } };
+  portfolioSnapshots[portfolioId] = portfolio;
   localStorage.setItem('bradtrack-active-portfolio', portfolioId);
-  renderPortfolioOptions();
+  populatePortfolioSelect('transaction-portfolio', dashboardFilterId === 'all' ? activePortfolioId : dashboardFilterId);
+  populatePortfolioSelect('target-portfolio', dashboardFilterId === 'all' ? activePortfolioId : dashboardFilterId);
+  renderDashboardFilterOptions();
   render();
 }
 
@@ -68,6 +84,11 @@ async function createPortfolio(alias) {
   const created = await response.json();
   portfolios.push(created);
   await loadPortfolio(created.id);
+  if (!readNumber(portfolio.settings.target)) {
+    portfolio.settings.target = DEFAULT_TARGET;
+    await persist();
+    render();
+  }
   return created.id;
 }
 
@@ -82,6 +103,8 @@ async function initializePortfolios() {
   const data = await response.json();
   portfolios = data.portfolios || [];
   if (!portfolios.length) throw new Error('No hay portfolios configurados.');
+  dashboardFilterId = 'all';
+  renderDashboardFilterOptions();
   const savedId = localStorage.getItem('bradtrack-active-portfolio');
   const selected = portfolios.find((item) => item.id === savedId) || portfolios[0];
   await loadPortfolio(selected.id);
@@ -126,9 +149,9 @@ function normalizeDate(value) {
   return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
 }
 
-function getPositions() {
+function getPositions(data = portfolio) {
   const positions = {};
-  for (const transaction of portfolio.transactions) {
+  for (const transaction of data.transactions) {
     const position = positions[transaction.symbol] || { symbol: transaction.symbol, quantity: 0, netInvested: 0 };
     const direction = transaction.type === 'SELL' ? -1 : 1;
     position.quantity += direction * transaction.quantity;
@@ -136,13 +159,13 @@ function getPositions() {
     positions[transaction.symbol] = position;
   }
   return Object.values(positions).filter((position) => position.quantity > 0.00000001).map((position) => {
-    const price = readNumber(portfolio.quotes[position.symbol]);
+    const price = readNumber(data.quotes[position.symbol]);
     return { ...position, price, value: position.quantity * price, result: position.quantity * price - position.netInvested };
   }).sort((first, second) => second.value - first.value);
 }
 
-function getNetContributions() {
-  return portfolio.transactions.reduce((total, transaction) => total + capitalImpact(transaction), 0);
+function getNetContributions(records = [{ data: portfolio }]) {
+  return records.reduce((total, record) => total + record.data.transactions.reduce((subtotal, transaction) => subtotal + capitalImpact(transaction), 0), 0);
 }
 
 function capitalImpact(transaction) {
@@ -154,9 +177,27 @@ function formatDate(date) {
   return date ? dateFormat.format(new Date(`${date}T12:00:00`)) : 'Sin fecha';
 }
 
-function renderMetrics(positions) {
+function aggregatePositions(records) {
+  const positions = new Map();
+  for (const record of records) {
+    for (const position of getPositions(record.data)) {
+      const combined = positions.get(position.symbol) || { symbol: position.symbol, quantity: 0, netInvested: 0, value: 0 };
+      combined.quantity += position.quantity;
+      combined.netInvested += position.netInvested;
+      combined.value += position.value;
+      positions.set(position.symbol, combined);
+    }
+  }
+  return [...positions.values()].map((position) => ({
+    ...position,
+    price: position.quantity ? position.value / position.quantity : 0,
+    result: position.value - position.netInvested
+  })).sort((first, second) => second.value - first.value);
+}
+
+function renderMetrics(positions, records) {
   const total = positions.reduce((sum, position) => sum + position.value, 0);
-  const invested = getNetContributions();
+  const invested = getNetContributions(records);
   const result = total - invested;
   const percent = invested ? result / invested * 100 : 0;
   byId('total-value').textContent = euro.format(total);
@@ -169,24 +210,29 @@ function renderMetrics(positions) {
   byId('unrealized-value').className = result >= 0 ? 'positive' : 'negative';
   byId('position-count').textContent = String(positions.length);
   byId('positions-badge').textContent = `${positions.length} ${positions.length === 1 ? 'activo' : 'activos'}`;
-  byId('transaction-count').textContent = `${portfolio.transactions.length} ${portfolio.transactions.length === 1 ? 'operacion' : 'operaciones'}`;
-  const dates = portfolio.transactions.map((transaction) => transaction.date).filter(Boolean).sort();
-  byId('as-of').textContent = dates.length ? `Desde ${formatDate(dates[0])} · ${portfolio.transactions.length} operaciones registradas` : 'Sin operaciones registradas';
-  const latestDate = Object.values(portfolio.history).flatMap((entries) => Object.keys(entries)).sort().at(-1);
-  byId('last-update').textContent = latestDate ? formatDate(latestDate) : (Object.keys(portfolio.quotes).length ? 'Cotizaciones' : 'Sin datos');
-  const target = readNumber(portfolio.settings.target);
+  const transactionCount = records.reduce((sum, record) => sum + record.data.transactions.length, 0);
+  byId('transaction-count').textContent = `${transactionCount} ${transactionCount === 1 ? 'operacion' : 'operaciones'}`;
+  const dates = records.flatMap((record) => record.data.transactions.map((transaction) => transaction.date)).filter(Boolean).sort();
+  const portfolioDescription = dashboardFilterId === 'all' ? 'todos los portfolios' : records[0]?.alias || 'portfolio';
+  byId('as-of').textContent = dates.length ? `Desde ${formatDate(dates[0])} · ${transactionCount} operaciones · ${portfolioDescription}` : `Sin operaciones · ${portfolioDescription}`;
+  const latestDate = records.flatMap((record) => Object.values(record.data.history).flatMap((entries) => Object.keys(entries))).sort().at(-1);
+  const hasQuotes = records.some((record) => Object.keys(record.data.quotes).length > 0);
+  byId('last-update').textContent = latestDate ? formatDate(latestDate) : (hasQuotes ? 'Cotizaciones' : 'Sin datos');
+  const target = records.reduce((sum, record) => sum + readNumber(record.data.settings?.target), 0);
   const progress = target > 0 ? Math.min(100, total / target * 100) : 0;
   byId('target-progress').style.width = `${progress}%`;
   byId('target-percent').textContent = target ? `${number.format(progress)} % del objetivo` : 'Define un objetivo';
   byId('target-remaining').textContent = target ? (total < target ? `Faltan ${euro.format(target - total)}` : 'Objetivo alcanzado') : '';
 }
 
-function renderPositions(positions) {
+function renderPositions(positions, allowActions) {
   const body = byId('positions-body');
   body.replaceChildren();
   for (const position of positions) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td><div class="asset-cell"><span class="asset-mark">${escapeHtml(position.symbol.slice(0, 2))}</span><span class="asset-symbol">${escapeHtml(position.symbol)}</span></div></td><td>${number.format(position.quantity)}</td><td>${euro.format(position.price)} <button class="small-action" data-quote="${escapeHtml(position.symbol)}" type="button" aria-label="Actualizar precio de ${escapeHtml(position.symbol)}">Editar</button></td><td>${euro.format(position.value)}</td><td class="${position.result >= 0 ? 'positive' : 'negative'}">${euro.format(position.result)}</td><td><button class="small-action" data-delete="${escapeHtml(position.symbol)}" type="button" aria-label="Eliminar operaciones de ${escapeHtml(position.symbol)}">Quitar</button></td>`;
+    const priceAction = allowActions ? ` <button class="small-action" data-quote="${escapeHtml(position.symbol)}" type="button" aria-label="Actualizar precio de ${escapeHtml(position.symbol)}">Editar</button>` : '';
+    const deleteAction = allowActions ? `<button class="small-action" data-delete="${escapeHtml(position.symbol)}" type="button" aria-label="Eliminar operaciones de ${escapeHtml(position.symbol)}">Quitar</button>` : '';
+    row.innerHTML = `<td><div class="asset-cell"><span class="asset-mark">${escapeHtml(position.symbol.slice(0, 2))}</span><span class="asset-symbol">${escapeHtml(position.symbol)}</span></div></td><td>${number.format(position.quantity)}</td><td>${euro.format(position.price)}${priceAction}</td><td>${euro.format(position.value)}</td><td class="${position.result >= 0 ? 'positive' : 'negative'}">${euro.format(position.result)}</td><td>${deleteAction}</td>`;
     body.append(row);
   }
   byId('positions-empty').hidden = positions.length > 0;
@@ -194,15 +240,16 @@ function renderPositions(positions) {
   body.querySelectorAll('[data-delete]').forEach((button) => button.addEventListener('click', () => removePosition(button.dataset.delete)));
 }
 
-function renderTransactions() {
+function renderTransactions(records) {
   const list = byId('transaction-list');
   list.replaceChildren();
-  const entries = [...portfolio.transactions].sort((first, second) => second.date.localeCompare(first.date)).slice(0, 5);
+  const entries = records.flatMap((record) => record.data.transactions.map((transaction) => ({ ...transaction, portfolioAlias: record.alias })))
+    .sort((first, second) => second.date.localeCompare(first.date)).slice(0, 5);
   for (const transaction of entries) {
     const row = document.createElement('div');
     row.className = 'transaction-row';
     const sell = transaction.type === 'SELL';
-    row.innerHTML = `<div class="transaction-info"><span class="transaction-type ${sell ? 'sell' : ''}">${sell ? '−' : '+'}</span><div class="transaction-meta"><strong>${escapeHtml(transaction.symbol)} · ${sell ? 'Venta' : 'Compra'}</strong><span>${formatDate(transaction.date)} · ${number.format(transaction.quantity)} ud.</span></div></div><div class="transaction-amount">${euro.format(transaction.price * transaction.quantity)}<span>${euro.format(transaction.price)} / ud.</span></div>`;
+    row.innerHTML = `<div class="transaction-info"><span class="transaction-type ${sell ? 'sell' : ''}">${sell ? '−' : '+'}</span><div class="transaction-meta"><strong>${escapeHtml(transaction.symbol)} · ${sell ? 'Venta' : 'Compra'}</strong><span>${escapeHtml(transaction.portfolioAlias)} · ${formatDate(transaction.date)} · ${number.format(transaction.quantity)} ud.</span></div></div><div class="transaction-amount">${euro.format(transaction.price * transaction.quantity)}<span>${euro.format(transaction.price)} / ud.</span></div>`;
     list.append(row);
   }
   byId('transactions-empty').hidden = entries.length > 0;
@@ -212,74 +259,121 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
-function historySeries() {
-  const dates = [...new Set(Object.values(portfolio.history).flatMap((entries) => Object.keys(entries)))].sort();
-  if (!dates.length) return { dates: [...new Set(portfolio.transactions.map((item) => item.date).filter(Boolean))].sort(), values: null };
-  const positions = {};
-  const historySymbols = Object.keys(portfolio.history);
-  let transactionIndex = 0;
-  const transactions = [...portfolio.transactions].sort((first, second) => first.date.localeCompare(second.date));
-  const values = [];
-  for (const date of dates) {
-    while (transactionIndex < transactions.length && transactions[transactionIndex].date <= date) {
-      const transaction = transactions[transactionIndex];
-      positions[transaction.symbol] = (positions[transaction.symbol] || 0) + (transaction.type === 'SELL' ? -transaction.quantity : transaction.quantity);
-      transactionIndex += 1;
-    }
-    let total = 0;
-    let hasHistoryPrice = false;
-    for (const symbol of historySymbols) {
-      const quantity = positions[symbol] || 0;
-      const quoteDates = Object.keys(portfolio.history[symbol]).filter((quoteDate) => quoteDate <= date).sort();
-      if (quantity > 0 && quoteDates.length) {
-        total += quantity * readNumber(portfolio.history[symbol][quoteDates.at(-1)]);
-        hasHistoryPrice = true;
+function getPortfolioSeries(data) {
+  const history = data.history || {};
+  const historyDates = [...new Set(Object.values(history).flatMap((entries) => Object.keys(entries)))].sort();
+  if (historyDates.length) {
+    const positions = {};
+    let transactionIndex = 0;
+    const transactions = [...(data.transactions || [])].sort((first, second) => first.date.localeCompare(second.date));
+    const points = [];
+    for (const date of historyDates) {
+      while (transactionIndex < transactions.length && transactions[transactionIndex].date <= date) {
+        const transaction = transactions[transactionIndex];
+        positions[transaction.symbol] = (positions[transaction.symbol] || 0) + (transaction.type === 'SELL' ? -transaction.quantity : transaction.quantity);
+        transactionIndex += 1;
       }
+      let total = 0;
+      let hasHistoryPrice = false;
+      for (const [symbol, entries] of Object.entries(history)) {
+        const quantity = positions[symbol] || 0;
+        const quoteDates = Object.keys(entries).filter((quoteDate) => quoteDate <= date).sort();
+        if (quantity > 0 && quoteDates.length) {
+          total += quantity * readNumber(entries[quoteDates.at(-1)]);
+          hasHistoryPrice = true;
+        }
+      }
+      if (hasHistoryPrice) points.push({ date, value: total });
     }
-    values.push(hasHistoryPrice ? total : null);
+    return { points, metric: 'valoracion' };
   }
-  return { dates, values };
+
+  let invested = 0;
+  const points = [];
+  for (const transaction of [...(data.transactions || [])].sort((first, second) => first.date.localeCompare(second.date))) {
+    invested += capitalImpact(transaction);
+    const lastPoint = points.at(-1);
+    if (lastPoint?.date === transaction.date) lastPoint.value = invested;
+    else points.push({ date: transaction.date, value: invested });
+  }
+  return { points, metric: points.length ? 'aportado' : 'sin datos' };
+}
+
+function portfolioColor(id, index) {
+  const palette = ['#78AFA4', '#D99AA5', '#D4AF70', '#8FA8CF', '#A99AC7', '#87B58D', '#D79678', '#78AFC2'];
+  if (index < palette.length) return palette[index];
+  return `hsl(${(index * 137.508) % 360} 38% 68%)`;
 }
 
 function renderChart() {
   const svg = byId('portfolio-chart');
-  const { dates, values } = historySeries();
-  const hasHistory = values !== null;
-  byId('chart-title').textContent = hasHistory ? 'Valoracion historica de la cartera' : 'Capital neto a lo largo del tiempo';
-  byId('chart-note').textContent = hasHistory
-    ? 'Valor estimado con las operaciones registradas y los cierres diarios importados. Solo incluye activos con historico disponible.'
-    : 'Importa historicos de precios Yahoo para ver valoracion diaria. Mientras tanto, mostramos el capital neto aportado.';
-  byId('legend-label').textContent = hasHistory ? 'Valoracion historica' : 'Capital neto aportado';
-  const filtered = dates.map((date, index) => ({ date, value: hasHistory ? values[index] : null })).filter((point) => {
-    if (activeRange === 'all' || !point.date) return true;
-    const date = new Date(`${point.date}T00:00:00`);
-    const threshold = new Date();
-    threshold.setMonth(threshold.getMonth() - (activeRange === 'year' ? 12 : 1));
-    return date >= threshold;
+  const series = portfolios.map((item, index) => {
+    const data = portfolioSnapshots[item.id] || (item.id === activePortfolioId ? portfolio : emptyPortfolio());
+    const result = getPortfolioSeries(data);
+    const points = result.points.filter((point) => {
+      if (activeRange === 'all' || !point.date) return true;
+      const date = new Date(`${point.date}T00:00:00`);
+      const threshold = new Date();
+      threshold.setMonth(threshold.getMonth() - (activeRange === 'year' ? 12 : 1));
+      return date >= threshold;
+    });
+    return { ...item, points, color: portfolioColor(item.id, index), metric: result.metric };
   });
-  const points = hasHistory
-    ? filtered.filter((point) => point.value !== null)
-    : filtered.map((point) => ({ ...point, value: portfolio.transactions.filter((item) => item.date <= point.date).reduce((sum, item) => sum + capitalImpact(item), 0) }));
+  const dates = [...new Set(series.flatMap((item) => item.points.map((point) => point.date)))].sort();
+  const plottedSeries = series.map((item) => {
+    let latest = null;
+    let pointIndex = 0;
+    const points = [];
+    for (const date of dates) {
+      while (pointIndex < item.points.length && item.points[pointIndex].date <= date) {
+        latest = item.points[pointIndex];
+        pointIndex += 1;
+      }
+      if (latest) points.push({ date, value: latest.value });
+    }
+    return { ...item, points };
+  });
+
+  const legend = byId('chart-legend');
+  legend.replaceChildren();
+  for (const item of plottedSeries) {
+    const entry = document.createElement('span');
+    entry.className = 'legend-item';
+    const mark = document.createElement('span');
+    mark.className = 'legend-mark';
+    mark.style.color = item.color;
+    mark.style.backgroundColor = item.color;
+    const label = document.createElement('span');
+    label.textContent = `${item.alias} · ${item.metric}`;
+    entry.append(mark, label);
+    legend.append(entry);
+  }
+  byId('chart-title').textContent = 'Evolucion de portfolios';
+  byId('chart-note').textContent = 'Valoracion con historicos importados; si faltan, se muestra el capital neto aportado. Cada linea conserva su propia metrica.';
   svg.replaceChildren();
-  byId('chart-empty').classList.toggle('hidden', points.length > 0);
-  if (!points.length) return;
-  const namespace = 'http://www.w3.org/2000/svg';
-  const create = (tag, attributes) => {
-    const element = document.createElementNS(namespace, tag);
-    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
-    return element;
-  };
+  const activeSeries = plottedSeries.filter((item) => item.points.length);
+  byId('chart-empty').classList.toggle('hidden', activeSeries.length > 0);
+  if (!activeSeries.length) return;
+
+  const points = activeSeries.flatMap((item) => item.points);
+  const minValue = Math.min(0, ...points.map((point) => point.value));
+  const maxValue = Math.max(1, ...points.map((point) => point.value));
   const width = 1000;
   const height = 280;
   const left = 62;
   const right = 12;
   const top = 15;
   const bottom = 33;
-  const minValue = Math.min(0, ...points.map((point) => point.value));
-  const maxValue = Math.max(1, ...points.map((point) => point.value));
   const spread = Math.max(1, maxValue - minValue);
-  const x = (index) => left + (points.length === 1 ? (width - left - right) / 2 : index / (points.length - 1) * (width - left - right));
+  const x = (index) => left + (dates.length === 1 ? (width - left - right) / 2 : index / (dates.length - 1) * (width - left - right));
   const y = (value) => top + (maxValue - value) / spread * (height - top - bottom);
+  const namespace = 'http://www.w3.org/2000/svg';
+  const create = (tag, attributes) => {
+    const element = document.createElementNS(namespace, tag);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+    return element;
+  };
+
   for (let grid = 0; grid < 4; grid += 1) {
     const value = maxValue - spread * grid / 3;
     const yPosition = y(value);
@@ -288,30 +382,48 @@ function renderChart() {
     label.textContent = euro.format(value);
     svg.append(label);
   }
-  const coordinates = points.map((point, index) => `${x(index)},${y(point.value)}`);
-  const linePath = `M ${coordinates.join(' L ')}`;
-  const areaPath = `${linePath} L ${x(points.length - 1)},${height - bottom} L ${x(0)},${height - bottom} Z`;
-  const defs = create('defs', {});
-  const gradient = create('linearGradient', { id: 'chartFill', x1: '0', x2: '0', y1: '0', y2: '1' });
-  gradient.append(create('stop', { offset: '0%', 'stop-color': 'var(--accent)', 'stop-opacity': '.2' }));
-  gradient.append(create('stop', { offset: '100%', 'stop-color': 'var(--accent)', 'stop-opacity': '0' }));
-  defs.append(gradient);
-  svg.append(defs, create('path', { d: areaPath, class: 'chart-area' }), create('path', { d: linePath, class: 'chart-line' }));
+  for (const item of activeSeries) {
+    const coordinates = item.points.map((point) => `${x(dates.indexOf(point.date))},${y(point.value)}`);
+    svg.append(create('path', { d: `M ${coordinates.join(' L ')}`, class: 'chart-line', stroke: item.color }));
+    const lastPoint = item.points.at(-1);
+    svg.append(create('circle', { cx: x(dates.indexOf(lastPoint.date)), cy: y(lastPoint.value), r: 4, class: 'chart-dot', stroke: item.color }));
+  }
   const first = create('text', { x: left, y: height - 7, class: 'chart-axis-label' });
-  first.textContent = formatDate(points[0].date);
+  first.textContent = formatDate(dates[0]);
   const last = create('text', { x: width - right, y: height - 7, 'text-anchor': 'end', class: 'chart-axis-label' });
-  last.textContent = formatDate(points.at(-1).date);
+  last.textContent = formatDate(dates.at(-1));
   svg.append(first, last);
-  const lastPoint = points.at(-1);
-  svg.append(create('circle', { cx: x(points.length - 1), cy: y(lastPoint.value), r: 5, class: 'chart-dot' }));
 }
 
 function render() {
-  const positions = getPositions();
-  renderMetrics(positions);
-  renderPositions(positions);
-  renderTransactions();
+  portfolioSnapshots[activePortfolioId] = portfolio;
+  renderDashboard();
+  refreshPortfolioSnapshots();
+}
+
+function renderDashboard() {
+  const records = getDashboardRecords();
+  const positions = aggregatePositions(records);
+  renderMetrics(positions, records);
+  renderPositions(positions, dashboardFilterId !== 'all');
+  renderTransactions(records);
   renderChart();
+}
+
+async function refreshPortfolioSnapshots() {
+  const responses = await Promise.all(portfolios.map(async (item) => {
+    try {
+      const response = await fetch(`/api/portfolios/${encodeURIComponent(item.id)}/data`);
+      if (!response.ok) return null;
+      return [item.id, await response.json()];
+    } catch {
+      return null;
+    }
+  }));
+  for (const result of responses) {
+    if (result) portfolioSnapshots[result[0]] = result[1];
+  }
+  renderDashboard();
 }
 
 function showToast(message) {
@@ -350,6 +462,7 @@ byId('theme-toggle').setAttribute('aria-label', document.body.classList.contains
 byId('add-transaction').addEventListener('click', () => {
   const form = byId('transaction-form');
   form.reset();
+  populatePortfolioSelect('transaction-portfolio', dashboardFilterId === 'all' ? activePortfolioId : dashboardFilterId);
   form.elements.date.value = new Date().toISOString().slice(0, 10);
   byId('form-error').textContent = '';
   byId('transaction-dialog').showModal();
@@ -362,6 +475,11 @@ document.querySelectorAll('.target-close').forEach((button) => button.addEventLi
 byId('transaction-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const targetPortfolioId = form.elements.portfolioId.value;
+  if (targetPortfolioId !== activePortfolioId) {
+    try { await loadPortfolio(targetPortfolioId); }
+    catch (error) { byId('form-error').textContent = error.message; return; }
+  }
   const transaction = {
     symbol: form.elements.symbol.value.trim().toUpperCase(),
     type: form.elements.type.value,
@@ -399,11 +517,19 @@ byId('quote-form').addEventListener('submit', async (event) => {
 
 byId('target-edit').addEventListener('click', () => {
   const form = byId('target-form');
-  form.elements.target.value = portfolio.settings.target || '';
+  populatePortfolioSelect('target-portfolio', dashboardFilterId === 'all' ? activePortfolioId : dashboardFilterId);
+  const targetPortfolioId = form.elements.portfolioId.value;
+  const targetData = portfolioSnapshots[targetPortfolioId] || portfolio;
+  form.elements.target.value = targetData.settings?.target || DEFAULT_TARGET;
   byId('target-dialog').showModal();
 });
 byId('target-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const targetPortfolioId = event.currentTarget.elements.portfolioId.value;
+  if (targetPortfolioId !== activePortfolioId) {
+    try { await loadPortfolio(targetPortfolioId); }
+    catch (error) { showToast(error.message); return; }
+  }
   const previousTarget = portfolio.settings.target;
   portfolio.settings.target = readNumber(event.currentTarget.elements.target.value);
   try { await persist(); byId('target-dialog').close(); render(); }
@@ -520,8 +646,13 @@ document.querySelectorAll('.import-close').forEach((button) => button.addEventLi
   byId('import-dialog').close();
 }));
 
-byId('portfolio-select').addEventListener('change', (event) => {
-  activatePortfolio(event.target.value).catch((error) => showToast(error.message));
+byId('dashboard-filter').addEventListener('change', (event) => {
+  dashboardFilterId = event.target.value;
+  if (dashboardFilterId !== 'all') {
+    activatePortfolio(dashboardFilterId).catch((error) => showToast(error.message));
+  } else {
+    renderDashboard();
+  }
 });
 byId('create-portfolio').addEventListener('click', () => {
   byId('portfolio-error').textContent = '';
@@ -537,7 +668,10 @@ byId('portfolio-form').addEventListener('submit', async (event) => {
   } catch (error) { byId('portfolio-error').textContent = error.message; }
 });
 
-byId('show-all-transactions').addEventListener('click', () => byId('transaction-dialog').showModal());
+byId('show-all-transactions').addEventListener('click', () => {
+  populatePortfolioSelect('transaction-portfolio', dashboardFilterId === 'all' ? activePortfolioId : dashboardFilterId);
+  byId('transaction-dialog').showModal();
+});
 document.querySelectorAll('.range-button').forEach((button) => button.addEventListener('click', () => {
   activeRange = button.dataset.range;
   document.querySelectorAll('.range-button').forEach((other) => other.classList.toggle('active', other === button));

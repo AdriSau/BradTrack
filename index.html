@@ -14,12 +14,6 @@
       <span class="brand-mark" aria-hidden="true">B</span>
       <span>BradTrack</span>
     </a>
-    <div class="portfolio-picker">
-      <select class="portfolio-select" id="portfolio-select" aria-label="Portfolio activo"></select>
-      <button class="icon-button portfolio-add" id="create-portfolio" type="button" aria-label="Crear portfolio" title="Crear portfolio">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
-    </div>
     <div class="top-actions">
       <span class="local-status"><span class="status-dot"></span>Solo en este dispositivo</span>
       <button class="icon-button" id="theme-toggle" type="button" aria-label="Activar modo oscuro" title="Cambiar tema">
@@ -31,8 +25,6 @@
   <main class="page-shell">
     <nav class="section-nav" aria-label="Secciones">
       <a class="nav-link active" href="#patrimonio">Patrimonio</a>
-      <a class="nav-link" href="#posiciones">Posiciones</a>
-      <a class="nav-link" href="#operaciones">Operaciones</a>
     </nav>
 
     <section class="intro-row" id="patrimonio">
@@ -40,8 +32,17 @@
         <p class="eyebrow">SEGUIMIENTO PERSONAL</p>
         <h1>Tu patrimonio,<br><span>en perspectiva.</span></h1>
         <p class="as-of" id="as-of">Sin operaciones registradas</p>
+        <label class="portfolio-filter">Mostrar patrimonio de
+          <select id="dashboard-filter" aria-label="Filtrar patrimonio por portfolio">
+            <option value="all">Todos los portfolios</option>
+          </select>
+        </label>
       </div>
       <div class="primary-actions">
+        <button class="button button-quiet" id="create-portfolio" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Nuevo portfolio
+        </button>
         <button class="button button-quiet" id="import-transactions" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
           Importar CSV
@@ -55,7 +56,7 @@
 
     <section class="net-worth-block" aria-label="Resumen del patrimonio">
       <div class="net-worth-main">
-        <p class="metric-label">VALOR ACTUAL DE LA CARTERA</p>
+        <p class="metric-label">VALOR ACTUAL DEL PATRIMONIO</p>
         <p class="net-worth-value" id="total-value">0,00&nbsp;€</p>
         <p class="net-worth-subline"><span id="gain-value">0,00&nbsp;€</span><span class="separator">/</span><span id="gain-percent">0,00&nbsp;%</span><span class="subline-caption">sobre el capital neto aportado</span></p>
       </div>
@@ -75,7 +76,7 @@
 
     <section class="panel chart-panel" aria-labelledby="chart-title">
       <div class="panel-heading chart-heading">
-        <div><p class="eyebrow">EVOLUCION</p><h2 id="chart-title">Capital a lo largo del tiempo</h2></div>
+        <div><p class="eyebrow">EVOLUCION</p><h2 id="chart-title">Evolucion de portfolios</h2></div>
         <div class="chart-controls"><button class="button button-quiet history-button" id="import-history" type="button">Importar historicos</button>
           <div class="range-control" role="group" aria-label="Rango del grafico">
             <button class="range-button active" data-range="all" type="button">Todo</button>
@@ -84,12 +85,12 @@
           </div>
         </div>
       </div>
-      <p class="chart-note" id="chart-note">Importa historicos de precios para ver la valoracion diaria. Mientras tanto, mostramos el capital neto aportado.</p>
+      <p class="chart-note" id="chart-note">Compara la valoracion historica o el capital aportado de cada portfolio.</p>
       <div class="chart-wrap" id="chart-wrap">
         <svg id="portfolio-chart" viewBox="0 0 1000 280" role="img" aria-label="Grafico de evolucion del patrimonio"></svg>
         <div class="chart-empty" id="chart-empty">Anade una operacion para empezar a seguir tu cartera.</div>
       </div>
-      <div class="chart-legend"><span class="legend-mark"></span><span id="legend-label">Capital neto aportado</span></div>
+      <div class="chart-legend" id="chart-legend" aria-label="Leyenda de portfolios"></div>
     </section>
 
     <section class="content-grid">
@@ -135,6 +136,7 @@
     <form id="transaction-form" method="dialog">
       <div class="dialog-heading"><div><p class="eyebrow">CARTERA</p><h2>Nueva operacion</h2></div><button class="icon-button dialog-close" type="button" aria-label="Cerrar">&times;</button></div>
       <div class="form-grid">
+        <label class="full-field">Portfolio<select name="portfolioId" id="transaction-portfolio" required></select></label>
         <label>Tipo<select name="type" required><option value="BUY">Compra</option><option value="SELL">Venta</option></select></label>
         <label>Fecha<input name="date" type="date" required></label>
         <label>Simbolo<input name="symbol" type="text" placeholder="Ej. MSFT" required maxlength="24" autocomplete="off"></label>
@@ -160,6 +162,7 @@
   <dialog id="target-dialog" class="dialog compact-dialog">
     <form id="target-form" method="dialog">
       <div class="dialog-heading"><div><p class="eyebrow">OBJETIVO</p><h2>Meta de patrimonio</h2></div><button class="icon-button target-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <label>Portfolio<select name="portfolioId" id="target-portfolio" required></select></label>
       <label>Objetivo en euros<input name="target" type="number" min="0" step="100" required></label>
       <div class="dialog-actions"><button class="button button-quiet target-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Guardar meta</button></div>
     </form>
