@@ -1,5 +1,5 @@
 const DEFAULT_TARGET = 100000;
-const emptyPortfolio = () => ({ transactions: [], quotes: {}, history: {}, settings: { target: DEFAULT_TARGET } });
+const emptyPortfolio = () => ({ transactions: [], quotes: {}, history: {}, settings: { target: 0 } });
 let portfolio = emptyPortfolio();
 let portfolios = [];
 let portfolioSnapshots = {};
@@ -8,6 +8,7 @@ let dashboardFilterId = 'all';
 let pendingImport = null;
 let activeRange = 'all';
 let toastTimer;
+let csrfToken = '';
 
 const euro = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 const number = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 5 });
@@ -15,22 +16,35 @@ const dateFormat = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: 'sh
 const byId = (id) => document.getElementById(id);
 const maxCsvBytes = 10 * 1024 * 1024;
 
+async function writeJson(path, data) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (!csrfToken) {
+      const sessionResponse = await fetch('/api/session', { cache: 'no-store' });
+      if (!sessionResponse.ok) throw new Error('No se pudo conectar con la sesion local.');
+      const session = await sessionResponse.json();
+      if (typeof session.csrfToken !== 'string' || !session.csrfToken) throw new Error('Sesion local invalida.');
+      csrfToken = session.csrfToken;
+    }
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-BradTrack-CSRF': csrfToken },
+      body: JSON.stringify(data)
+    });
+    if (response.status !== 403 || attempt === 1) return response;
+    // Refresh the in-memory token if the local server was restarted.
+    csrfToken = '';
+  }
+}
+
 async function persist() {
-  const response = await fetch(`/api/portfolios/${encodeURIComponent(activePortfolioId)}/data`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(portfolio)
-  });
+  const response = await writeJson(`/api/portfolios/${encodeURIComponent(activePortfolioId)}/data`, portfolio);
   if (!response.ok) throw new Error('No se pudieron guardar los datos locales.');
 }
 
 async function archiveCsv(file, category) {
   if (file.size > maxCsvBytes) throw new Error('El CSV supera el limite de 10 MB.');
-  const response = await fetch(`/api/portfolios/${encodeURIComponent(activePortfolioId)}/imports`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: file.name, category, content: await file.text() })
-  });
+  const response = await writeJson(`/api/portfolios/${encodeURIComponent(activePortfolioId)}/imports`,
+    { name: file.name, category, content: await file.text() });
   if (!response.ok) throw new Error('No se pudo guardar el CSV en .data/imports.');
   return response.json();
 }
@@ -72,11 +86,7 @@ async function loadPortfolio(portfolioId) {
 }
 
 async function createPortfolio(alias) {
-  const response = await fetch('/api/portfolios', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ alias })
-  });
+  const response = await writeJson('/api/portfolios', { alias });
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(detail.includes('already exists') ? 'Ya existe un portfolio con ese alias.' : 'No se pudo crear el portfolio.');
@@ -421,7 +431,7 @@ async function refreshPortfolioSnapshots() {
     }
   }));
   for (const result of responses) {
-    if (result) portfolioSnapshots[result[0]] = result[1];
+    if (result && result[0] !== activePortfolioId) portfolioSnapshots[result[0]] = result[1];
   }
   renderDashboard();
 }
@@ -678,4 +688,314 @@ document.querySelectorAll('.range-button').forEach((button) => button.addEventLi
   renderChart();
 }));
 
+const mortgageTaxRates = {
+  'Andalucía': { itp: 0.07, ajd: 0.012, newTax: 0.10 },
+  'Aragón': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'Asturias': { itp: 0.08, ajd: 0.012, newTax: 0.10 },
+  'Illes Balears': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'Canarias': { itp: 0.065, ajd: 0.0075, newTax: 0.07 },
+  'Cantabria': { itp: 0.09, ajd: 0.015, newTax: 0.10 },
+  'Castilla-La Mancha': { itp: 0.09, ajd: 0.015, newTax: 0.10 },
+  'Castilla y León': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'Cataluña': { itp: 0.10, ajd: 0.015, newTax: 0.10 },
+  'Comunidad Valenciana': { itp: 0.10, ajd: 0.015, newTax: 0.10 },
+  'Extremadura': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'Galicia': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'La Rioja': { itp: 0.07, ajd: 0.01, newTax: 0.10 },
+  'Comunidad de Madrid': { itp: 0.06, ajd: 0.0075, newTax: 0.10 },
+  'Región de Murcia': { itp: 0.08, ajd: 0.015, newTax: 0.10 },
+  'Navarra': { itp: 0.06, ajd: 0.005, newTax: 0.10 },
+  'País Vasco': { itp: 0.04, ajd: 0.005, newTax: 0.10 },
+  'Ceuta': { itp: 0.06, ajd: 0.005, newTax: 0.04 },
+  'Melilla': { itp: 0.06, ajd: 0.005, newTax: 0.04 }
+};
+const mortgageOtherPurchaseCostRate = 0.015;
+let downPaymentMode = 'percent';
+const mortgageNumberFormat = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+
+function readMortgageNumber(value) {
+  let normalized = String(value ?? '').trim().replace(/[€%\s]/g, '');
+  if (!normalized) return 0;
+  if (normalized.includes(',')) normalized = normalized.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(?:\.\d{3})+$/.test(normalized)) normalized = normalized.replace(/\./g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMortgageInput(value, decimals = 2, grouping = true) {
+  return new Intl.NumberFormat('es-ES', { useGrouping: grouping, maximumFractionDigits: decimals }).format(value);
+}
+
+function setMortgageCriterion(id, state, detail) {
+  const item = byId(id);
+  item.dataset.state = state;
+  item.querySelector('.criterion-detail').textContent = detail;
+}
+
+function resetMortgageResults() {
+  byId('mortgage-monthly').textContent = '—';
+  byId('mortgage-principal').textContent = '—';
+  byId('mortgage-term-summary').textContent = '—';
+  byId('mortgage-total-interest').textContent = '—';
+  byId('mortgage-total-paid').textContent = '—';
+  byId('mortgage-purchase-costs').textContent = '—';
+  byId('mortgage-cash-needed').textContent = '—';
+  renderAmortizationChart([]);
+  setMortgageCriterion('criterion-ltv', 'pending', 'Introduce el precio del inmueble y la entrada.');
+  setMortgageCriterion('criterion-effort', 'pending', 'Introduce precio, plazo e ingresos netos mensuales.');
+  setMortgageCriterion('criterion-savings', 'pending', 'Introduce el precio, la entrada y tu ahorro disponible.');
+}
+
+function buildAmortization(principal, annualRate, years) {
+  const months = years * 12;
+  const monthlyRate = annualRate / 1200;
+  const payment = monthlyRate === 0
+    ? principal / months
+    : principal * monthlyRate / (1 - Math.pow(1 + monthlyRate, -months));
+  let balance = principal;
+  let totalInterest = 0;
+  let totalPaid = 0;
+  const annualRows = [];
+  let yearPaid = 0;
+  let yearPrincipal = 0;
+  let yearInterest = 0;
+
+  for (let month = 1; month <= months; month += 1) {
+    const interest = balance * monthlyRate;
+    const paid = month === months ? balance + interest : payment;
+    const principalPaid = Math.min(balance, paid - interest);
+    balance = Math.max(0, balance - principalPaid);
+    yearPaid += paid;
+    yearPrincipal += principalPaid;
+    yearInterest += interest;
+    totalPaid += paid;
+    totalInterest += interest;
+
+    if (month % 12 === 0 || month === months) {
+      annualRows.push({ year: Math.ceil(month / 12), paid: yearPaid, principal: yearPrincipal, interest: yearInterest, balance });
+      yearPaid = 0;
+      yearPrincipal = 0;
+      yearInterest = 0;
+    }
+  }
+
+  return { payment, totalInterest, totalPaid, annualRows };
+}
+
+function renderAmortizationChart(rows, principal = 0, emptyMessage = 'Introduce el precio del inmueble para generar el gráfico.') {
+  const svg = byId('amortization-chart');
+  const empty = byId('mortgage-chart-empty');
+  svg.replaceChildren();
+  empty.textContent = emptyMessage;
+  empty.hidden = rows.length > 0;
+  if (!rows.length) return;
+
+  const namespace = 'http://www.w3.org/2000/svg';
+  const create = (tag, attributes) => {
+    const element = document.createElementNS(namespace, tag);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+    return element;
+  };
+  const addText = (text, x, y, className, anchor = 'start') => {
+    const element = create('text', { x, y, class: className, 'text-anchor': anchor });
+    element.textContent = text;
+    svg.append(element);
+  };
+  const width = 1000;
+  const left = 88;
+  const right = 982;
+  const plotWidth = right - left;
+  const topPlot = { top: 30, bottom: 178 };
+  const paymentPlot = { top: 254, bottom: 404 };
+  const maxBalance = Math.max(1, principal);
+  const maxYearlyPaid = Math.max(1, ...rows.map((row) => row.paid));
+  const xAtYear = (year) => left + year / rows.length * plotWidth;
+  const balanceY = (balance) => topPlot.bottom - balance / maxBalance * (topPlot.bottom - topPlot.top);
+  const paymentY = (amount) => paymentPlot.bottom - amount / maxYearlyPaid * (paymentPlot.bottom - paymentPlot.top);
+
+  addText('Capital pendiente', left, 18, 'mortgage-chart-title');
+  addText('Cuotas anuales: capital e intereses', left, 239, 'mortgage-chart-title');
+
+  for (let grid = 0; grid <= 3; grid += 1) {
+    const fraction = grid / 3;
+    const balance = maxBalance * (1 - fraction);
+    const topY = topPlot.top + fraction * (topPlot.bottom - topPlot.top);
+    svg.append(create('line', { x1: left, x2: right, y1: topY, y2: topY, class: 'mortgage-chart-grid' }));
+    addText(euro.format(balance), left - 10, topY + 4, 'mortgage-chart-axis', 'end');
+
+    const paid = maxYearlyPaid * (1 - fraction);
+    const bottomY = paymentPlot.top + fraction * (paymentPlot.bottom - paymentPlot.top);
+    svg.append(create('line', { x1: left, x2: right, y1: bottomY, y2: bottomY, class: 'mortgage-chart-grid' }));
+    addText(euro.format(paid), left - 10, bottomY + 4, 'mortgage-chart-axis', 'end');
+  }
+
+  const balances = [{ year: 0, balance: principal }, ...rows.map((row) => ({ year: row.year, balance: row.balance }))];
+  const balancePath = balances.map((point, index) => `${index === 0 ? 'M' : 'L'} ${xAtYear(point.year)} ${balanceY(point.balance)}`).join(' ');
+  svg.append(create('path', { d: balancePath, class: 'mortgage-balance-line' }));
+  const lastBalance = balances.at(-1);
+  svg.append(create('circle', { cx: xAtYear(lastBalance.year), cy: balanceY(lastBalance.balance), r: 4, class: 'mortgage-balance-point' }));
+  addText('0', xAtYear(0), topPlot.bottom + 18, 'mortgage-chart-axis', 'middle');
+
+  const barWidth = Math.max(5, Math.min(24, plotWidth / rows.length * 0.56));
+  const yearLabelStep = Math.max(1, Math.ceil(rows.length / 10));
+  for (const row of rows) {
+    const center = xAtYear(row.year - 0.5);
+    const principalTop = paymentY(row.principal);
+    const totalTop = paymentY(row.paid);
+    svg.append(create('rect', { x: center - barWidth / 2, y: principalTop, width: barWidth, height: paymentPlot.bottom - principalTop, rx: 2, class: 'mortgage-principal-bar' }));
+    svg.append(create('rect', { x: center - barWidth / 2, y: totalTop, width: barWidth, height: principalTop - totalTop, rx: 2, class: 'mortgage-interest-bar' }));
+    if (row.year % yearLabelStep === 0 || row.year === rows.length) {
+      addText(String(row.year), center, paymentPlot.bottom + 18, 'mortgage-chart-axis', 'middle');
+    }
+  }
+}
+
+function bindMortgageNumberFormatting() {
+  const fields = [
+    ['mortgage-price', 2, true],
+    ['mortgage-rate', 2, false],
+    ['mortgage-years', 0, false],
+    ['mortgage-down-eur', 2, true],
+    ['mortgage-down-percent', 2, false],
+    ['mortgage-income', 2, true],
+    ['mortgage-debts', 2, true],
+    ['mortgage-savings', 2, true]
+  ];
+  for (const [id, decimals, grouping] of fields) {
+    const input = byId(id);
+    input.addEventListener('focus', () => {
+      if (input.value.trim()) input.value = formatMortgageInput(readMortgageNumber(input.value), decimals, false);
+    });
+    input.addEventListener('blur', () => {
+      if (input.value.trim()) input.value = formatMortgageInput(readMortgageNumber(input.value), decimals, grouping);
+    });
+  }
+}
+
+function calculateMortgage() {
+  const price = readMortgageNumber(byId('mortgage-price').value);
+  const annualRate = readMortgageNumber(byId('mortgage-rate').value);
+  const years = Math.floor(readMortgageNumber(byId('mortgage-years').value));
+  const downPercent = readMortgageNumber(byId('mortgage-down-percent').value);
+  const downAmount = readMortgageNumber(byId('mortgage-down-eur').value);
+  const income = readMortgageNumber(byId('mortgage-income').value);
+  const otherDebts = readMortgageNumber(byId('mortgage-debts').value);
+  const savingsText = byId('mortgage-savings').value.trim();
+  const availableSavings = readMortgageNumber(savingsText);
+  const region = mortgageTaxRates[byId('mortgage-region').value] || mortgageTaxRates['Comunidad de Madrid'];
+  const propertyType = byId('mortgage-property-type').value;
+
+  byId('mortgage-assumption').textContent = byId('mortgage-type').value === 'fixed'
+    ? 'La simulación usa el tipo fijo introducido y el sistema francés de amortización. No incluye seguros ni comisiones.'
+    : 'Para hipotecas variables y mixtas, el tipo indicado se mantiene constante durante todo el plazo de esta simulación; las revisiones reales pueden cambiar la cuota.';
+
+  if (price <= 0 || years <= 0 || years > 50 || annualRate < 0 || annualRate > 25 || downAmount < 0 || income < 0 || otherDebts < 0 || availableSavings < 0 || (downPaymentMode === 'percent' && (downPercent < 0 || downPercent > 100))) {
+    resetMortgageResults();
+    return;
+  }
+
+  const entry = downPaymentMode === 'amount' ? downAmount : price * downPercent / 100;
+  const percentage = price ? entry / price * 100 : 0;
+  const principal = price - entry;
+  byId('mortgage-down-eur').value = formatMortgageInput(entry, 2, true);
+  byId('mortgage-down-percent').value = formatMortgageInput(percentage, 2, false);
+  byId('mortgage-principal').textContent = euro.format(Math.max(0, principal));
+  byId('mortgage-term-summary').textContent = `${years} años · ${years * 12} cuotas`;
+
+  if (principal < 0) {
+    byId('mortgage-monthly').textContent = '—';
+    byId('mortgage-principal').textContent = '—';
+    byId('mortgage-total-interest').textContent = '—';
+    byId('mortgage-total-paid').textContent = '—';
+    byId('mortgage-purchase-costs').textContent = '—';
+    byId('mortgage-cash-needed').textContent = '—';
+    renderAmortizationChart([], 0, 'La entrada supera el precio del inmueble; revisa los importes.');
+    setMortgageCriterion('criterion-ltv', 'fail', 'La entrada supera el precio del inmueble; revisa los importes.');
+    setMortgageCriterion('criterion-effort', 'pending', 'Revisa el precio y la entrada.');
+    setMortgageCriterion('criterion-savings', 'pending', 'Revisa el precio y la entrada.');
+    return;
+  }
+
+  const schedule = principal > 0 ? buildAmortization(principal, annualRate, years) : { payment: 0, totalInterest: 0, totalPaid: 0, annualRows: [] };
+  byId('mortgage-monthly').textContent = euro.format(schedule.payment);
+  byId('mortgage-total-interest').textContent = euro.format(schedule.totalInterest);
+  byId('mortgage-total-paid').textContent = euro.format(schedule.totalPaid);
+  renderAmortizationChart(schedule.annualRows, Math.max(0, principal));
+
+  const ltv = price ? principal / price : 0;
+  if (ltv <= 0.8) {
+    setMortgageCriterion('criterion-ltv', 'pass', `LTV ${number.format(ltv * 100)}%; dentro de la referencia del 80%.`);
+  } else {
+    const minimumEntry = price * 0.2;
+    setMortgageCriterion('criterion-ltv', 'fail', `Para llegar al 80%, la entrada sería ${euro.format(minimumEntry)}; faltan ${euro.format(Math.max(0, minimumEntry - entry))}.`);
+  }
+
+  if (income <= 0) {
+    setMortgageCriterion('criterion-effort', 'pending', 'Introduce los ingresos netos mensuales del hogar.');
+  } else {
+    const monthlyCommitments = schedule.payment + otherDebts;
+    const effort = monthlyCommitments / income;
+    if (effort <= 0.35) {
+      setMortgageCriterion('criterion-effort', 'pass', `Esfuerzo total ${number.format(effort * 100)}% de los ingresos netos.`);
+    } else {
+      const minimumIncome = monthlyCommitments / 0.35;
+      setMortgageCriterion('criterion-effort', 'fail', `Ingresos netos necesarios: ${euro.format(minimumIncome)} al mes; faltan ${euro.format(Math.max(0, minimumIncome - income))}.`);
+    }
+  }
+
+  const taxRate = propertyType === 'new' ? region.newTax + region.ajd : region.itp;
+  const purchaseCosts = price * (taxRate + mortgageOtherPurchaseCostRate);
+  const cashNeeded = entry + purchaseCosts;
+  byId('mortgage-purchase-costs').textContent = euro.format(purchaseCosts);
+  byId('mortgage-cash-needed').textContent = euro.format(cashNeeded);
+  if (!savingsText) {
+    setMortgageCriterion('criterion-savings', 'pending', `Ahorro estimado necesario: ${euro.format(cashNeeded)} (entrada e impuestos/gastos).`);
+  } else if (availableSavings >= cashNeeded) {
+    setMortgageCriterion('criterion-savings', 'pass', `Ahorro suficiente; quedarían ${euro.format(availableSavings - cashNeeded)} tras entrada e impuestos/gastos.`);
+  } else {
+    setMortgageCriterion('criterion-savings', 'fail', `Ahorro necesario: ${euro.format(cashNeeded)}; te faltan ${euro.format(cashNeeded - availableSavings)}.`);
+  }
+}
+
+function updateDownPaymentFromPercent() {
+  downPaymentMode = 'percent';
+  const price = readMortgageNumber(byId('mortgage-price').value);
+  const percent = readMortgageNumber(byId('mortgage-down-percent').value);
+  byId('mortgage-down-eur').value = price > 0 ? formatMortgageInput(price * percent / 100, 2, true) : '';
+  calculateMortgage();
+}
+
+function updateDownPaymentFromAmount() {
+  downPaymentMode = 'amount';
+  const price = readMortgageNumber(byId('mortgage-price').value);
+  const amount = readMortgageNumber(byId('mortgage-down-eur').value);
+  byId('mortgage-down-percent').value = price > 0 ? formatMortgageInput(amount / price * 100, 2, false) : '';
+  calculateMortgage();
+}
+
+function activateMainTab(tabName) {
+  const mortgageActive = tabName === 'mortgage';
+  byId('portfolio-view').hidden = mortgageActive;
+  byId('mortgage-view').hidden = !mortgageActive;
+  byId('tab-patrimonio').classList.toggle('active', !mortgageActive);
+  byId('tab-hipotecas').classList.toggle('active', mortgageActive);
+  byId('tab-patrimonio').setAttribute('aria-selected', String(!mortgageActive));
+  byId('tab-hipotecas').setAttribute('aria-selected', String(mortgageActive));
+}
+
+byId('tab-patrimonio').addEventListener('click', () => activateMainTab('portfolio'));
+byId('tab-hipotecas').addEventListener('click', () => activateMainTab('mortgage'));
+byId('mortgage-price').addEventListener('input', () => {
+  if (downPaymentMode === 'percent') updateDownPaymentFromPercent();
+  else updateDownPaymentFromAmount();
+});
+byId('mortgage-down-percent').addEventListener('input', updateDownPaymentFromPercent);
+byId('mortgage-down-eur').addEventListener('input', updateDownPaymentFromAmount);
+document.querySelectorAll('[data-mortgage-input]').forEach((input) => input.addEventListener('input', calculateMortgage));
+bindMortgageNumberFormatting();
+byId('mortgage-type').addEventListener('change', calculateMortgage);
+byId('mortgage-region').addEventListener('change', calculateMortgage);
+byId('mortgage-property-type').addEventListener('change', calculateMortgage);
+
+calculateMortgage();
 initializePortfolios().catch((error) => showToast(error.message));

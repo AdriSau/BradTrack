@@ -2,3 +2,32 @@
 *.tmp
 CONTEXT.md
 resources/
+
+# Local environments and credentials
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.aws/
+.ssh/
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Financial exports, databases and backups
+*.csv
+*.xls
+*.xlsx
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+portfolio*.json

@@ -23,10 +23,12 @@
   </header>
 
   <main class="page-shell">
-    <nav class="section-nav" aria-label="Secciones">
-      <a class="nav-link active" href="#patrimonio">Patrimonio</a>
+    <nav class="section-nav" role="tablist" aria-label="Secciones principales">
+      <button class="nav-link active" id="tab-patrimonio" type="button" role="tab" aria-selected="true" aria-controls="portfolio-view">Patrimonio</button>
+      <button class="nav-link" id="tab-hipotecas" type="button" role="tab" aria-selected="false" aria-controls="mortgage-view">Hipotecas</button>
     </nav>
 
+    <div id="portfolio-view" role="tabpanel" aria-labelledby="tab-patrimonio">
     <section class="intro-row" id="patrimonio">
       <div>
         <p class="eyebrow">SEGUIMIENTO PERSONAL</p>
@@ -107,6 +109,111 @@
     </section>
 
     <footer class="disclaimer">Herramienta de seguimiento personal. Los precios dependen de los archivos que importes y pueden no estar actualizados.</footer>
+    </div>
+
+    <section id="mortgage-view" class="mortgage-view" role="tabpanel" aria-labelledby="tab-hipotecas" hidden>
+      <header class="mortgage-heading">
+        <p class="eyebrow">PLANIFICACION DE VIVIENDA</p>
+        <h1>Calculadora de <span>hipotecas.</span></h1>
+        <p class="mortgage-intro">Cuota estimada, esfuerzo financiero y ahorro inicial con una tabla de amortización.</p>
+      </header>
+
+      <div class="mortgage-hero-grid">
+        <section class="mortgage-payment panel" aria-label="Cuota mensual estimada">
+          <p class="metric-label">CUOTA MENSUAL ESTIMADA</p>
+          <strong id="mortgage-monthly">—</strong>
+          <div class="mortgage-payment-meta">
+            <span>Importe financiado <b id="mortgage-principal">—</b></span>
+            <span>Plazo <b id="mortgage-term-summary">—</b></span>
+          </div>
+        </section>
+        <section class="mortgage-criteria panel" aria-labelledby="criteria-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow">EVALUACION ORIENTATIVA</p><h2 id="criteria-title">Criterios principales</h2></div>
+          </div>
+          <div class="criteria-list" id="mortgage-criteria">
+            <article class="criterion" id="criterion-ltv" data-state="pending">
+              <span class="criterion-dot" aria-hidden="true"></span>
+              <div><strong>Financiación ≤ 80%</strong><span class="criterion-detail">Referencia habitual; no es un límite legal ni una oferta bancaria.</span></div>
+            </article>
+            <article class="criterion" id="criterion-effort" data-state="pending">
+              <span class="criterion-dot" aria-hidden="true"></span>
+              <div><strong>Esfuerzo financiero ≤ 35%</strong><span class="criterion-detail">Incluye cuota hipotecaria y pagos de otras deudas.</span></div>
+            </article>
+            <article class="criterion" id="criterion-savings" data-state="pending">
+              <span class="criterion-dot" aria-hidden="true"></span>
+              <div><strong>Ahorro para entrada y gastos</strong><span class="criterion-detail">Compara tu ahorro disponible con el efectivo estimado para la compra.</span></div>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel mortgage-form-panel" aria-labelledby="mortgage-inputs-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">SIMULACION</p><h2 id="mortgage-inputs-title">Datos de la compra</h2></div>
+          <span class="count-pill">Importes en euros</span>
+        </div>
+        <div class="mortgage-form-grid">
+          <label>Precio del inmueble / tasación
+            <span class="input-with-suffix"><input id="mortgage-price" data-mortgage-input type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 250.000"><span>€</span></span>
+          </label>
+          <label>Tipo de hipoteca
+            <select id="mortgage-type"><option value="fixed">Fija</option><option value="variable">Variable</option><option value="mixed">Mixta</option></select>
+          </label>
+          <label>Tipo de interés nominal
+            <span class="input-with-suffix"><input id="mortgage-rate" data-mortgage-input type="text" inputmode="decimal" autocomplete="off" value="3"><span>%</span></span>
+          </label>
+          <label>Plazo
+            <span class="input-with-suffix"><input id="mortgage-years" data-mortgage-input type="text" inputmode="numeric" autocomplete="off" value="30"><span>años</span></span>
+          </label>
+          <label>Entrada en euros
+            <span class="input-with-suffix"><input id="mortgage-down-eur" type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 50.000"><span>€</span></span>
+          </label>
+          <label>Entrada en porcentaje
+            <span class="input-with-suffix"><input id="mortgage-down-percent" type="text" inputmode="decimal" autocomplete="off" value="20"><span>%</span></span>
+          </label>
+          <label>Ingresos netos mensuales del hogar
+            <span class="input-with-suffix"><input id="mortgage-income" data-mortgage-input type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 3.500"><span>€</span></span>
+          </label>
+          <label>Pagos mensuales de otras deudas
+            <span class="input-with-suffix"><input id="mortgage-debts" data-mortgage-input type="text" inputmode="decimal" autocomplete="off" value="0"><span>€</span></span>
+          </label>
+          <label>Ahorro total disponible
+            <span class="input-with-suffix"><input id="mortgage-savings" data-mortgage-input type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 70.000"><span>€</span></span>
+          </label>
+          <label>Comunidad autónoma
+            <select id="mortgage-region">
+              <option value="Andalucía">Andalucía</option><option value="Aragón">Aragón</option><option value="Asturias">Asturias</option><option value="Illes Balears">Illes Balears</option><option value="Canarias">Canarias</option><option value="Cantabria">Cantabria</option><option value="Castilla-La Mancha">Castilla-La Mancha</option><option value="Castilla y León">Castilla y León</option><option value="Cataluña">Cataluña</option><option value="Comunidad Valenciana">Comunidad Valenciana</option><option value="Extremadura">Extremadura</option><option value="Galicia">Galicia</option><option value="La Rioja">La Rioja</option><option value="Comunidad de Madrid" selected>Comunidad de Madrid</option><option value="Región de Murcia">Región de Murcia</option><option value="Navarra">Navarra</option><option value="País Vasco">País Vasco</option><option value="Ceuta">Ceuta</option><option value="Melilla">Melilla</option>
+            </select>
+          </label>
+          <label>Tipo de vivienda
+            <select id="mortgage-property-type"><option value="used">Segunda mano</option><option value="new">Nueva</option></select>
+          </label>
+        </div>
+        <div class="mortgage-assumption" id="mortgage-assumption">Para hipotecas variables y mixtas, el tipo indicado se mantiene constante en esta simulación; las revisiones reales pueden cambiar la cuota.</div>
+        <div class="purchase-cost-summary" aria-live="polite">
+          <span>Impuestos y gastos de compra estimados</span><strong id="mortgage-purchase-costs">—</strong>
+          <span>Efectivo estimado necesario (entrada + gastos)</span><strong id="mortgage-cash-needed">—</strong>
+        </div>
+      </section>
+
+      <section class="panel amortization-panel" aria-labelledby="amortization-title">
+        <div class="panel-heading amortization-heading">
+          <div><p class="eyebrow">DETALLE DEL PRESTAMO</p><h2 id="amortization-title">Amortización anual</h2></div>
+          <div class="amortization-totals"><span>Intereses totales <strong id="mortgage-total-interest">—</strong></span><span>Total pagado <strong id="mortgage-total-paid">—</strong></span></div>
+        </div>
+        <div class="amortization-legend" aria-label="Leyenda de amortización">
+          <span><i class="amort-legend-dot balance-key"></i>Capital pendiente</span>
+          <span><i class="amort-legend-dot principal-key"></i>Capital amortizado por año</span>
+          <span><i class="amort-legend-dot interest-key"></i>Intereses pagados por año</span>
+        </div>
+        <div class="mortgage-chart-scroll">
+          <svg id="amortization-chart" viewBox="0 0 1000 440" role="img" aria-label="Gráfico de saldo pendiente y amortización anual"></svg>
+          <p class="mortgage-chart-empty" id="mortgage-chart-empty">Introduce el precio del inmueble para generar el gráfico.</p>
+        </div>
+        <p class="mortgage-disclaimer">Simulación informativa con sistema francés. El 80% de financiación y el 35% de esfuerzo son referencias orientativas, no requisitos legales ni una promesa de concesión. Los impuestos se estiman con tipos generales y pueden variar por tramos, bonificaciones y circunstancias personales.</p>
+      </section>
+    </section>
   </main>
 
   <input id="transaction-file" type="file" accept=".csv,text/csv" hidden>

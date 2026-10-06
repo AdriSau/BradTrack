@@ -30,9 +30,61 @@ button { color: inherit; }
 .icon-button svg, .button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .page-shell { max-width: 1380px; margin: 0 auto; padding: 0 26px 38px; }
 .section-nav { display: flex; gap: 30px; height: 52px; border-bottom: 1px solid var(--line); }
-.nav-link { position: relative; display: inline-flex; align-items: center; color: var(--muted); text-decoration: none; }
+.nav-link { position: relative; display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; text-decoration: none; }
 .nav-link.active { color: var(--accent); font-weight: 650; }
 .nav-link.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); content: ""; }
+.mortgage-view { display: grid; gap: 16px; padding-top: 34px; }
+.mortgage-view[hidden] { display: none; }
+.mortgage-heading { padding-bottom: 3px; }
+.mortgage-heading h1 { margin-bottom: 8px; }
+.mortgage-intro { margin: 0; color: var(--muted); font-size: 12px; }
+.mortgage-hero-grid { display: grid; grid-template-columns: minmax(300px, .88fr) minmax(440px, 1.12fr); gap: 14px; }
+.mortgage-payment, .mortgage-criteria, .mortgage-form-panel, .amortization-panel { padding: 22px; }
+.mortgage-payment { display: flex; min-height: 230px; flex-direction: column; justify-content: center; background: var(--surface-muted); }
+.mortgage-payment strong { display: block; overflow-wrap: anywhere; margin: 14px 0 18px; font-size: clamp(42px, 5vw, 64px); line-height: 1; font-weight: 740; font-variant-numeric: tabular-nums; }
+.mortgage-payment-meta { display: flex; flex-wrap: wrap; gap: 10px 24px; color: var(--muted); font-size: 11px; }
+.mortgage-payment-meta b { display: block; margin-top: 4px; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.mortgage-criteria { min-height: 230px; }
+.criteria-list { display: grid; gap: 0; margin-top: 13px; }
+.criterion { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 11px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+.criterion-dot { width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; background: #a1a5a1; box-shadow: 0 0 0 3px color-mix(in srgb, #a1a5a1 18%, transparent); }
+.criterion[data-state="pass"] .criterion-dot { background: var(--positive); box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 18%, transparent); }
+.criterion[data-state="fail"] .criterion-dot { background: var(--negative); box-shadow: 0 0 0 3px color-mix(in srgb, var(--negative) 18%, transparent); }
+.criterion strong { display: block; font-size: 12px; font-weight: 700; }
+.criterion-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.mortgage-form-panel { padding-bottom: 18px; }
+.mortgage-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px 14px; margin-top: 22px; }
+.mortgage-form-grid label { display: grid; min-width: 0; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.mortgage-form-grid input, .mortgage-form-grid select { width: 100%; height: 41px; min-width: 0; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; outline: none; background: var(--bg); color: var(--ink); font-size: 12px; }
+.mortgage-form-grid input:focus, .mortgage-form-grid select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input-with-suffix { position: relative; display: block; }
+.input-with-suffix input { padding-right: 46px; font-variant-numeric: tabular-nums; }
+.input-with-suffix > span { position: absolute; top: 50%; right: 11px; transform: translateY(-50%); color: var(--muted); font-size: 10px; font-weight: 600; pointer-events: none; }
+.mortgage-assumption { margin-top: 17px; padding: 10px 12px; border-left: 2px solid var(--accent); background: var(--surface-muted); color: var(--muted); font-size: 10px; line-height: 1.5; }
+.purchase-cost-summary { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; padding-top: 16px; color: var(--muted); font-size: 11px; }
+.purchase-cost-summary strong { color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.amortization-heading { align-items: flex-end; }
+.amortization-totals { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 20px; color: var(--muted); font-size: 10px; }
+.amortization-totals span { display: grid; gap: 4px; }
+.amortization-totals strong { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.amortization-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 19px; color: var(--muted); font-size: 10px; }
+.amortization-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.amort-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.balance-key { background: var(--accent); }
+.principal-key { background: var(--positive); }
+.interest-key { background: var(--lime); }
+.mortgage-chart-scroll { position: relative; overflow-x: auto; margin-top: 12px; }
+#amortization-chart { display: block; width: 100%; min-width: 760px; height: auto; }
+.mortgage-chart-title { fill: var(--ink); font-size: 12px; font-weight: 700; }
+.mortgage-chart-axis { fill: var(--muted); font-size: 10px; }
+.mortgage-chart-grid { stroke: var(--line); stroke-dasharray: 3 5; stroke-width: 1; }
+.mortgage-balance-line { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.mortgage-balance-point { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.mortgage-principal-bar { fill: var(--positive); }
+.mortgage-interest-bar { fill: var(--lime); }
+.mortgage-chart-empty { margin: 0; padding: 82px 12px; color: var(--muted); font-size: 12px; text-align: center; }
+.mortgage-disclaimer { margin: 14px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.mortgage-view .panel { border-radius: 8px; }
 .intro-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 40px 0 30px; }
 .eyebrow, .metric-label { margin: 0; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .09em; }
 h1 { margin: 11px 0 8px; font-size: clamp(30px, 4vw, 46px); line-height: 1.06; font-weight: 720; letter-spacing: -.035em; }
@@ -147,6 +199,8 @@ body.dark .transaction-type.sell { background: #392727; color: var(--negative); 
 @media (max-width: 850px) {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .content-grid { grid-template-columns: 1fr; }
+  .mortgage-hero-grid { grid-template-columns: 1fr; }
+  .mortgage-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .recent-panel { min-height: 200px; }
 }
 @media (max-width: 600px) {
@@ -163,6 +217,16 @@ body.dark .transaction-type.sell { background: #392727; color: var(--negative); 
   .primary-actions { width: 100%; }
   .primary-actions { flex-wrap: wrap; }
   .primary-actions .button { flex: 1 1 calc(50% - 5px); min-width: 0; padding: 0 9px; font-size: 11px; }
+  .mortgage-view { gap: 11px; padding-top: 26px; }
+  .mortgage-payment, .mortgage-criteria, .mortgage-form-panel, .amortization-panel { padding: 16px 13px; }
+  .mortgage-payment { min-height: 180px; }
+  .mortgage-payment strong { font-size: 44px; }
+  .mortgage-form-grid { grid-template-columns: 1fr; gap: 13px; margin-top: 17px; }
+  .amortization-heading { align-items: flex-start; flex-direction: column; }
+  .amortization-totals { justify-content: flex-start; }
+  .mortgage-chart-scroll { margin-right: -13px; }
+  #amortization-chart { min-width: 720px; }
+  .purchase-cost-summary { gap: 8px 10px; }
   .net-worth-block { grid-template-columns: 1fr; gap: 22px; padding: 22px 0; }
   .net-worth-value { font-size: 48px; }
   .net-worth-subline { flex-wrap: wrap; font-size: 12px; }
