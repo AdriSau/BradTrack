@@ -9,6 +9,10 @@ let pendingImport = null;
 let activeRange = 'all';
 let toastTimer;
 let csrfToken = '';
+let assetMetadata = { fields: [], assets: {} };
+let assetDraft = null;
+let assetSymbols = [];
+let savingAssets = false;
 
 const euro = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 const number = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 5 });
@@ -108,6 +112,7 @@ async function activatePortfolio(portfolioId) {
 }
 
 async function initializePortfolios() {
+  assetMetadata = await loadAssetMetadata();
   const response = await fetch('/api/portfolios');
   if (!response.ok) throw new Error('No se pudo cargar la lista de portfolios.');
   const data = await response.json();
@@ -118,7 +123,168 @@ async function initializePortfolios() {
   const savedId = localStorage.getItem('bradtrack-active-portfolio');
   const selected = portfolios.find((item) => item.id === savedId) || portfolios[0];
   await loadPortfolio(selected.id);
+  byId('manage-assets').disabled = false;
 }
+
+async function loadAssetMetadata() {
+  const response = await fetch('/api/assets', { cache: 'no-store' });
+  if (!response.ok) throw new Error('No se pudo cargar el catálogo de activos. Reinicia el servidor si acabas de actualizar la aplicación.');
+  return response.json();
+}
+
+function assetName(symbol) {
+  return assetMetadata.assets[symbol.toUpperCase()]?.alias?.trim() || symbol;
+}
+
+function collectAssetSymbols(records) {
+  const symbols = new Set();
+  for (const { data } of records) {
+    for (const transaction of data.transactions) symbols.add(transaction.symbol.toUpperCase());
+    for (const symbol of [...Object.keys(data.quotes), ...Object.keys(data.history)]) symbols.add(symbol.toUpperCase());
+  }
+  return [...symbols].sort((first, second) => first.localeCompare(second));
+}
+
+function renderAssetTable() {
+  const heading = document.createElement('tr');
+  for (const name of ['Ticker', 'Alias / acrónimo', 'Tipo de activo', ...assetDraft.fields]) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = name;
+    if (assetDraft.fields.includes(name)) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'small-action';
+      remove.textContent = 'Quitar';
+      remove.setAttribute('aria-label', `Quitar campo ${name}`);
+      remove.addEventListener('click', () => {
+        assetDraft.fields = assetDraft.fields.filter((field) => field !== name);
+        for (const asset of Object.values(assetDraft.assets)) delete asset.values[name];
+        renderAssetTable();
+      });
+      cell.append(remove);
+    }
+    heading.append(cell);
+  }
+  byId('assets-head').replaceChildren(heading);
+  const body = byId('assets-body');
+  body.replaceChildren();
+  for (const symbol of assetSymbols) {
+    const asset = assetDraft.assets[symbol] ||= { alias: '', type: '', values: {} };
+    const row = document.createElement('tr');
+    row.dataset.symbol = symbol;
+    const ticker = document.createElement('td');
+    ticker.textContent = symbol;
+    row.append(ticker);
+    const columns = [
+      { name: 'Alias / acrónimo', key: 'alias', limit: 80 },
+      { name: 'Tipo de activo', key: 'type', limit: 48 },
+      ...assetDraft.fields.map((name) => ({ name, key: name, limit: 500, custom: true }))
+    ];
+    for (const column of columns) {
+      const cell = document.createElement('td');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = column.limit;
+      input.value = (column.custom ? asset.values[column.key] : asset[column.key]) || '';
+      input.setAttribute('aria-label', `${column.name} de ${symbol}`);
+      if (column.key === 'type' && !column.custom) {
+        input.setAttribute('list', 'asset-types');
+        input.placeholder = 'Selecciona o escribe';
+      } else if (!column.custom) input.placeholder = symbol;
+      input.addEventListener('input', () => {
+        if (column.custom) asset.values[column.key] = input.value;
+        else asset[column.key] = input.value;
+      });
+      cell.append(input);
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  byId('assets-count').textContent = `${assetSymbols.length} ${assetSymbols.length === 1 ? 'activo' : 'activos'}`;
+  byId('assets-empty').hidden = assetSymbols.length > 0;
+}
+
+byId('manage-assets').addEventListener('click', async () => {
+  const button = byId('manage-assets');
+  button.disabled = true;
+  try {
+    const [metadata, records] = await Promise.all([
+      loadAssetMetadata(),
+      Promise.all(portfolios.map(async (item) => {
+        const response = await fetch(`/api/portfolios/${encodeURIComponent(item.id)}/data`);
+        if (!response.ok) throw new Error('No se pudieron cargar todos los activos.');
+        return { data: await response.json() };
+      }))
+    ]);
+    assetMetadata = metadata;
+    assetDraft = structuredClone(metadata);
+    assetSymbols = collectAssetSymbols(records);
+    byId('asset-field-name').value = '';
+    byId('assets-error').textContent = '';
+    renderAssetTable();
+    renderDashboard();
+    byId('assets-dialog').showModal();
+  } catch (error) { showToast(error.message); }
+  finally { button.disabled = false; }
+});
+
+function addAssetField() {
+  const input = byId('asset-field-name');
+  const name = input.value.trim();
+  const reserved = ['ticker', 'alias', 'acronimo', 'acrónimo', 'alias / acrónimo', 'tipo', 'tipo de activo', '__proto__', 'constructor', 'prototype'];
+  if (!name || name.length > 48 || /[\x00-\x1f\x7f]/.test(name) || reserved.includes(name.toLocaleLowerCase('es')) ||
+      assetDraft.fields.some((field) => field.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
+    byId('assets-error').textContent = 'Escribe un nombre de campo único, de hasta 48 caracteres.';
+    return;
+  }
+  if (assetDraft.fields.length >= 20) {
+    byId('assets-error').textContent = 'Puedes añadir hasta 20 campos personalizados.';
+    return;
+  }
+  assetDraft.fields.push(name);
+  input.value = '';
+  byId('assets-error').textContent = '';
+  renderAssetTable();
+  input.focus();
+}
+
+byId('add-asset-field').addEventListener('click', addAssetField);
+byId('asset-field-name').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); addAssetField(); }
+});
+document.querySelectorAll('.assets-close').forEach((button) => button.addEventListener('click', () => {
+  if (!savingAssets) byId('assets-dialog').close();
+}));
+byId('assets-dialog').addEventListener('cancel', (event) => { if (savingAssets) event.preventDefault(); });
+byId('assets-dialog').addEventListener('close', () => {
+  if (!byId('assets-dialog').open) assetDraft = null;
+});
+byId('assets-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (savingAssets || !assetDraft) return;
+  const saved = structuredClone(assetDraft);
+  for (const asset of Object.values(saved.assets)) {
+    asset.alias = asset.alias.trim();
+    asset.type = asset.type.trim();
+  }
+  savingAssets = true;
+  const controls = [...byId('assets-form').querySelectorAll('input, button')];
+  controls.forEach((control) => { control.disabled = true; });
+  byId('assets-error').textContent = '';
+  try {
+    const response = await writeJson('/api/assets', saved);
+    if (!response.ok) throw new Error('No se pudieron guardar los datos de activos. Revisa los campos e inténtalo de nuevo.');
+    assetMetadata = saved;
+    byId('assets-dialog').close();
+    renderDashboard();
+    showToast('Datos de activos guardados.');
+  } catch (error) { byId('assets-error').textContent = error.message; }
+  finally {
+    savingAssets = false;
+    controls.forEach((control) => { control.disabled = false; });
+  }
+});
 
 function readNumber(value) {
   const parsed = Number(String(value ?? '').trim().replace(',', '.'));
@@ -240,9 +406,10 @@ function renderPositions(positions, allowActions) {
   body.replaceChildren();
   for (const position of positions) {
     const row = document.createElement('tr');
-    const priceAction = allowActions ? ` <button class="small-action" data-quote="${escapeHtml(position.symbol)}" type="button" aria-label="Actualizar precio de ${escapeHtml(position.symbol)}">Editar</button>` : '';
-    const deleteAction = allowActions ? `<button class="small-action" data-delete="${escapeHtml(position.symbol)}" type="button" aria-label="Eliminar operaciones de ${escapeHtml(position.symbol)}">Quitar</button>` : '';
-    row.innerHTML = `<td><div class="asset-cell"><span class="asset-mark">${escapeHtml(position.symbol.slice(0, 2))}</span><span class="asset-symbol">${escapeHtml(position.symbol)}</span></div></td><td>${number.format(position.quantity)}</td><td>${euro.format(position.price)}${priceAction}</td><td>${euro.format(position.value)}</td><td class="${position.result >= 0 ? 'positive' : 'negative'}">${euro.format(position.result)}</td><td>${deleteAction}</td>`;
+    const name = assetName(position.symbol);
+    const priceAction = allowActions ? ` <button class="small-action" data-quote="${escapeHtml(position.symbol)}" type="button" aria-label="Actualizar precio de ${escapeHtml(name)}">Editar</button>` : '';
+    const deleteAction = allowActions ? `<button class="small-action" data-delete="${escapeHtml(position.symbol)}" type="button" aria-label="Eliminar operaciones de ${escapeHtml(name)}">Quitar</button>` : '';
+    row.innerHTML = `<td><div class="asset-cell"><span class="asset-mark">${escapeHtml(name.slice(0, 2))}</span><span class="asset-symbol">${escapeHtml(name)}</span></div></td><td>${number.format(position.quantity)}</td><td>${euro.format(position.price)}${priceAction}</td><td>${euro.format(position.value)}</td><td class="${position.result >= 0 ? 'positive' : 'negative'}">${euro.format(position.result)}</td><td>${deleteAction}</td>`;
     body.append(row);
   }
   byId('positions-empty').hidden = positions.length > 0;
@@ -259,7 +426,7 @@ function renderTransactions(records) {
     const row = document.createElement('div');
     row.className = 'transaction-row';
     const sell = transaction.type === 'SELL';
-    row.innerHTML = `<div class="transaction-info"><span class="transaction-type ${sell ? 'sell' : ''}">${sell ? '−' : '+'}</span><div class="transaction-meta"><strong>${escapeHtml(transaction.symbol)} · ${sell ? 'Venta' : 'Compra'}</strong><span>${escapeHtml(transaction.portfolioAlias)} · ${formatDate(transaction.date)} · ${number.format(transaction.quantity)} ud.</span></div></div><div class="transaction-amount">${euro.format(transaction.price * transaction.quantity)}<span>${euro.format(transaction.price)} / ud.</span></div>`;
+    row.innerHTML = `<div class="transaction-info"><span class="transaction-type ${sell ? 'sell' : ''}">${sell ? '−' : '+'}</span><div class="transaction-meta"><strong>${escapeHtml(assetName(transaction.symbol))} · ${sell ? 'Venta' : 'Compra'}</strong><span>${escapeHtml(transaction.portfolioAlias)} · ${formatDate(transaction.date)} · ${number.format(transaction.quantity)} ud.</span></div></div><div class="transaction-amount">${euro.format(transaction.price * transaction.quantity)}<span>${euro.format(transaction.price)} / ud.</span></div>`;
     list.append(row);
   }
   byId('transactions-empty').hidden = entries.length > 0;
@@ -317,6 +484,9 @@ function portfolioColor(id, index) {
 
 function renderChart() {
   const svg = byId('portfolio-chart');
+  const { width, height } = byId('chart-wrap').getBoundingClientRect();
+  if (!width || !height) return;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const series = portfolios.map((item, index) => {
     const data = portfolioSnapshots[item.id] || (item.id === activePortfolioId ? portfolio : emptyPortfolio());
     const result = getPortfolioSeries(data);
@@ -368,14 +538,10 @@ function renderChart() {
   const points = activeSeries.flatMap((item) => item.points);
   const minValue = Math.min(0, ...points.map((point) => point.value));
   const maxValue = Math.max(1, ...points.map((point) => point.value));
-  const width = 1000;
-  const height = 280;
-  const left = 62;
   const right = 12;
   const top = 15;
   const bottom = 33;
   const spread = Math.max(1, maxValue - minValue);
-  const x = (index) => left + (dates.length === 1 ? (width - left - right) / 2 : index / (dates.length - 1) * (width - left - right));
   const y = (value) => top + (maxValue - value) / spread * (height - top - bottom);
   const namespace = 'http://www.w3.org/2000/svg';
   const create = (tag, attributes) => {
@@ -384,13 +550,22 @@ function renderChart() {
     return element;
   };
 
+  const axisLabels = [];
   for (let grid = 0; grid < 4; grid += 1) {
     const value = maxValue - spread * grid / 3;
     const yPosition = y(value);
-    svg.append(create('line', { x1: left, x2: width - right, y1: yPosition, y2: yPosition, class: 'chart-grid-line' }));
-    const label = create('text', { x: left - 9, y: yPosition + 4, 'text-anchor': 'end', class: 'chart-axis-label' });
+    const label = create('text', { y: yPosition + 4, 'text-anchor': 'end', class: 'chart-axis-label' });
     label.textContent = euro.format(value);
     svg.append(label);
+    axisLabels.push(label);
+  }
+  // Reserve the actual label width so amounts stay inside the panel at any size.
+  const left = Math.ceil(Math.max(...axisLabels.map((label) => label.getComputedTextLength()))) + 17;
+  const x = (index) => left + (dates.length === 1 ? (width - left - right) / 2 : index / (dates.length - 1) * (width - left - right));
+  for (const label of axisLabels) {
+    label.setAttribute('x', left - 9);
+    const yPosition = Number(label.getAttribute('y')) - 4;
+    svg.append(create('line', { x1: left, x2: width - right, y1: yPosition, y2: yPosition, class: 'chart-grid-line' }));
   }
   for (const item of activeSeries) {
     const coordinates = item.points.map((point) => `${x(dates.indexOf(point.date))},${y(point.value)}`);
@@ -398,11 +573,13 @@ function renderChart() {
     const lastPoint = item.points.at(-1);
     svg.append(create('circle', { cx: x(dates.indexOf(lastPoint.date)), cy: y(lastPoint.value), r: 4, class: 'chart-dot', stroke: item.color }));
   }
-  const first = create('text', { x: left, y: height - 7, class: 'chart-axis-label' });
+  const first = create('text', { x: dates.length === 1 ? x(0) : left, y: height - 7, 'text-anchor': dates.length === 1 ? 'middle' : 'start', class: 'chart-axis-label' });
   first.textContent = formatDate(dates[0]);
+  svg.append(first);
+  if (dates.length === 1) return;
   const last = create('text', { x: width - right, y: height - 7, 'text-anchor': 'end', class: 'chart-axis-label' });
   last.textContent = formatDate(dates.at(-1));
-  svg.append(first, last);
+  svg.append(last);
 }
 
 function render() {
@@ -447,12 +624,13 @@ function showToast(message) {
 function openQuote(symbol) {
   const form = byId('quote-form');
   form.elements.symbol.value = symbol;
+  byId('quote-asset-name').textContent = assetName(symbol);
   form.elements.price.value = portfolio.quotes[symbol] || '';
   byId('quote-dialog').showModal();
 }
 
 async function removePosition(symbol) {
-  if (!confirm(`Se eliminaran todas las operaciones de ${symbol}. Esta accion no se puede deshacer.`)) return;
+  if (!confirm(`Se eliminaran todas las operaciones de ${assetName(symbol)}. Esta accion no se puede deshacer.`)) return;
   const previous = portfolio;
   portfolio = { ...portfolio, transactions: portfolio.transactions.filter((item) => item.symbol !== symbol), quotes: { ...portfolio.quotes }, history: { ...portfolio.history } };
   delete portfolio.quotes[symbol];
@@ -521,7 +699,7 @@ byId('quote-form').addEventListener('submit', async (event) => {
   const symbol = form.elements.symbol.value;
   const oldQuote = portfolio.quotes[symbol];
   portfolio.quotes[symbol] = readNumber(form.elements.price.value);
-  try { await persist(); byId('quote-dialog').close(); render(); showToast(`Precio de ${symbol} actualizado.`); }
+  try { await persist(); byId('quote-dialog').close(); render(); showToast(`Precio de ${assetName(symbol)} actualizado.`); }
   catch (error) { portfolio.quotes[symbol] = oldQuote; showToast(error.message); }
 });
 
@@ -973,18 +1151,309 @@ function updateDownPaymentFromAmount() {
   calculateMortgage();
 }
 
+// Payroll estimate: AEAT retention algorithm 2026 (10 September), ordinary
+// employees under 65; Order PJC/297/2026, articles 1-4, 16-17 and 31.
+const salaryRules = {
+  maxMonthlyBase: 5101.20,
+  minimumBases: { 1: 1989.30, 2: 1649.70, 3: 1435.20, 4: 1424.40 },
+  commonRate: 0.047, trainingRate: 0.001, meiRate: 0.0015,
+  brackets: [
+    { from: 0, to: 12450, rate: 0.19 },
+    { from: 12450, to: 20200, rate: 0.24 },
+    { from: 20200, to: 35200, rate: 0.30 },
+    { from: 35200, to: 60000, rate: 0.37 },
+    { from: 60000, to: 300000, rate: 0.45 },
+    { from: 300000, to: Infinity, rate: 0.47 }
+  ]
+};
+const salaryMonths = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+let salaryExtraMonths = [6, 12];
+const salaryPercent = (rate) => `${formatMortgageInput(rate * 100, 2, false)} %`;
+const salaryRound = (value) => Math.round((value + 1e-9) * 100) / 100;
+
+function readSalaryNumber(value) {
+  const text = String(value).trim().replace(/[€%\s\u00a0]/g, '');
+  if (!text) return null;
+  // Accept Spanish grouping/decimal notation and ungrouped decimal points.
+  if (!/^(?:\d+(?:[.,]\d{1,2})?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)$/.test(text)) return NaN;
+  return readMortgageNumber(text);
+}
+
+function salaryScale(base) {
+  return salaryRules.brackets.reduce((total, bracket) => total + Math.max(0, Math.min(base, bracket.to) - bracket.from) * bracket.rate, 0);
+}
+
+function calculateSalaryScenario(options) {
+  const { gross, bonus = 0, payments = 12, extraMonths = [6, 12], contract = 'permanent', children = 0, youngChildren = 0, childShare = 0.5, family = '3', group = '4', manualRate = null } = options;
+  if (bonus > 0) {
+    const fixedSalary = calculateSalaryScenario({ ...options, bonus: 0 });
+    const annualProjection = calculateSalaryScenario({ ...options, gross: salaryRound(gross + bonus), bonus: 0 });
+    const bonusTax = salaryRound(annualProjection.tax - fixedSalary.tax);
+    const bonusSocialSecurity = salaryRound(annualProjection.socialSecurity - fixedSalary.socialSecurity);
+    // Separate-bonus simulation: keep all fixed payroll payments unchanged and
+    // charge the incremental annual deductions to the bonus when it is paid.
+    return {
+      ...fixedSalary, bonus, fixedSalary,
+      totalGross: annualProjection.totalGross,
+      contributions: annualProjection.contributions,
+      socialSecurity: annualProjection.socialSecurity,
+      tax: annualProjection.tax,
+      annualNet: annualProjection.annualNet,
+      bonusTax, bonusSocialSecurity,
+      bonusNet: salaryRound(bonus - bonusTax - bonusSocialSecurity),
+      bonusRate: bonusTax / bonus
+    };
+  }
+  const totalGross = salaryRound(gross + bonus);
+  const monthlyGross = salaryRound(totalGross / 12);
+  const monthlyBase = Math.min(salaryRules.maxMonthlyBase, Math.max(salaryRules.minimumBases[group], monthlyGross));
+  const unemploymentRate = contract === 'permanent' ? 0.0155 : 0.016;
+  const excess = Math.max(0, monthlyGross - salaryRules.maxMonthlyBase);
+  const solidarityMonthly = Math.min(excess, salaryRules.maxMonthlyBase * 0.1) * 0.0019
+    + Math.min(Math.max(0, excess - salaryRules.maxMonthlyBase * 0.1), salaryRules.maxMonthlyBase * 0.4) * 0.0021
+    + Math.max(0, excess - salaryRules.maxMonthlyBase * 0.5) * 0.0024;
+  // Each contribution is rounded on the monthly payroll, then summed annually.
+  const contributions = [
+    { label: 'Contingencias comunes', rate: salaryRules.commonRate, monthly: salaryRound(monthlyBase * salaryRules.commonRate) },
+    { label: 'Desempleo', rate: unemploymentRate, monthly: salaryRound(monthlyBase * unemploymentRate) },
+    { label: 'Formación profesional', rate: salaryRules.trainingRate, monthly: salaryRound(monthlyBase * salaryRules.trainingRate) },
+    { label: 'Mecanismo de equidad intergeneracional (MEI)', rate: salaryRules.meiRate, monthly: salaryRound(monthlyBase * salaryRules.meiRate) },
+    { label: 'Cotización adicional de solidaridad', rate: null, monthly: salaryRound(solidarityMonthly) }
+  ].map((item) => ({ ...item, annual: salaryRound(item.monthly * 12) }));
+  const socialSecurity = salaryRound(contributions.reduce((sum, item) => sum + item.annual, 0));
+  const netWork = Math.max(0, totalGross - socialSecurity);
+  let reduction = 0;
+  if (netWork <= 14852) reduction = 7302;
+  else if (netWork <= 17673.52) reduction = 7302 - 1.75 * (netWork - 14852);
+  else if (netWork < 19747.50) reduction = 2364.34 - 1.14 * (netWork - 17673.52);
+  reduction = salaryRound(Math.max(0, reduction));
+  const base = salaryRound(Math.max(0, netWork - Math.min(2000, netWork) - reduction - (children > 2 ? 600 : 0)));
+  let familyMinimum = 5550;
+  const share = family === '1' ? 1 : childShare;
+  for (let child = 0; child < children; child += 1) familyMinimum += ([2400, 2700, 4000][child] ?? 4500) * share;
+  familyMinimum += youngChildren * 2800 * share;
+  const exemptLimits = { '1': [0, 17644, 18694], '2': [17197, 18130, 19262], '3': [15876, 16342, 16867] };
+  const exemptLimit = exemptLimits[family][Math.min(children, 2)];
+  let quota = totalGross <= exemptLimit ? 0 : Math.max(0, salaryScale(base) - salaryScale(familyMinimum));
+  if (totalGross <= 35200) quota = Math.min(quota, Math.max(0, (totalGross - exemptLimit) * 0.43));
+  let rate = Math.floor((quota / totalGross * 100 + 1e-9) * 100) / 10000;
+  if (contract === 'short') rate = Math.max(0.02, rate);
+  if (manualRate !== null) rate = manualRate / 100;
+  const tax = salaryRound(totalGross * rate);
+  const annualNet = salaryRound(totalGross - socialSecurity - tax);
+  const marginalIndex = salaryRules.brackets.findIndex((bracket) => base <= bracket.to);
+
+  // Work in cents so that every monthly total reconciles with the annual result.
+  const fixedCents = Math.round(gross * 100);
+  const fixedParts = Array.from({ length: payments }, (_, index) => (Math.floor(fixedCents / payments) + (index < fixedCents % payments ? 1 : 0)) / 100);
+  const extraPaymentMonths = payments === 14 ? [...extraMonths].sort((a, b) => a - b) : [];
+  const months = salaryMonths.map((name, index) => {
+    const extraIndex = extraPaymentMonths.indexOf(index + 1);
+    return { name, month: index + 1, ordinary: fixedParts[index], extra: extraIndex >= 0 ? fixedParts[12 + extraIndex] : 0, bonus: 0 };
+  });
+  return { gross, bonus, totalGross, monthlyBase, contributions, socialSecurity, reduction, base, familyMinimum, rate, tax, annualNet, marginalIndex, months, bonusTax: 0, bonusSocialSecurity: 0, bonusNet: 0, bonusRate: 0 };
+}
+
+function buildSalaryCalendar(result, bonusMonth) {
+  const fixedSalary = result.fixedSalary || result;
+  const months = fixedSalary.months.map((month) => ({ ...month, bonus: month.month === bonusMonth ? result.bonusNet : 0 }));
+  let assignedTaxCents = 0;
+  const targetTaxCents = Math.round(fixedSalary.tax * 100);
+  const events = months.flatMap((month) => ['ordinary', 'extra'].filter((kind) => month[kind] > 0).map((kind) => ({ month, kind, gross: month[kind] })));
+  events.forEach((event, index) => {
+    const taxCents = index === events.length - 1 ? targetTaxCents - assignedTaxCents : Math.round(event.gross * fixedSalary.rate * 100);
+    assignedTaxCents += taxCents;
+    event.month[event.kind] = salaryRound(event.gross - taxCents / 100);
+  });
+  const monthlySocial = salaryRound(fixedSalary.socialSecurity / 12);
+  months.forEach((month) => {
+    month.ordinary = salaryRound(month.ordinary - monthlySocial);
+    month.total = salaryRound(month.ordinary + month.extra + month.bonus);
+  });
+  return months;
+}
+
+function salaryTableRow(cells, className = '') {
+  const row = document.createElement('tr');
+  if (className) row.className = className;
+  cells.forEach((value) => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); });
+  return row;
+}
+
+function renderSalaryExtraMonths() {
+  const enabled = byId('salary-payments').value === '14';
+  byId('salary-extra-months').querySelectorAll('button').forEach((button) => {
+    const selected = salaryExtraMonths.includes(Number(button.dataset.month));
+    button.disabled = !enabled;
+    button.setAttribute('aria-pressed', String(enabled && selected));
+  });
+  byId('salary-extra-months-note').textContent = enabled
+    ? `${salaryExtraMonths.length} de 2 meses elegidos. Pulsa un mes marcado para cambiarlo.`
+    : 'Activa 14 pagas para elegir los dos meses de las extras.';
+}
+
+function bindSalaryMonthButtons(containerId, label, onSelect) {
+  const container = byId(containerId);
+  salaryMonths.forEach((name, index) => {
+    const month = index + 1;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'salary-month-button';
+    button.dataset.month = String(month);
+    button.textContent = name.slice(0, 3);
+    button.setAttribute('aria-label', `${name}: ${label}`);
+    button.title = name;
+    button.addEventListener('click', () => onSelect(month));
+    container.append(button);
+  });
+}
+
+function bindSalaryExtraMonths() {
+  bindSalaryMonthButtons('salary-extra-months', 'paga extra', (month) => {
+    if (salaryExtraMonths.includes(month)) salaryExtraMonths = salaryExtraMonths.filter((value) => value !== month);
+    else if (salaryExtraMonths.length < 2) salaryExtraMonths = [...salaryExtraMonths, month].sort((a, b) => a - b);
+    else {
+      byId('salary-extra-months-note').textContent = 'Ya has elegido 2 meses. Desmarca uno para elegir otro.';
+      return;
+    }
+    renderSalary();
+  });
+}
+
+function renderSalaryBonusMonths() {
+  const enabled = byId('salary-bonus-enabled').checked;
+  const month = Number(byId('salary-bonus-month').value);
+  byId('salary-bonus').disabled = !enabled;
+  byId('salary-bonus-assumption').hidden = !enabled;
+  byId('salary-bonus-months').querySelectorAll('button').forEach((button) => {
+    button.disabled = !enabled;
+    button.setAttribute('aria-pressed', String(enabled && Number(button.dataset.month) === month));
+  });
+  byId('salary-bonus-months-note').textContent = enabled
+    ? `Cobro en ${salaryMonths[month - 1].toLowerCase()}. Elige un único mes.`
+    : 'Activa «Incluir bonus» para elegir el mes de cobro.';
+}
+
+function renderSalary() {
+  renderSalaryExtraMonths();
+  renderSalaryBonusMonths();
+  const gross = readSalaryNumber(byId('salary-gross').value);
+  const bonusEnabled = byId('salary-bonus-enabled').checked;
+  const bonus = bonusEnabled ? (readSalaryNumber(byId('salary-bonus').value) ?? 0) : 0;
+  const manualRate = readSalaryNumber(byId('salary-irpf-override').value);
+  const children = Number(byId('salary-children').value);
+  const youngChildren = Number(byId('salary-young-children').value);
+  const family = byId('salary-family').value;
+  const foral = byId('salary-territory').value !== 'common';
+  byId('salary-child-share').disabled = family === '1';
+  if (family === '1') byId('salary-child-share').value = '1';
+  byId('salary-error').textContent = '';
+  byId('salary-results').hidden = true;
+  byId('salary-empty').hidden = gross !== null;
+  if (gross === null) return;
+  const fail = (message) => { byId('salary-error').textContent = message; };
+  if (byId('salary-payments').value === '14' && salaryExtraMonths.length !== 2) return fail('Elige dos meses para las pagas extra.');
+  if (!Number.isFinite(gross) || gross <= 0 || gross > 10000000) return fail('Introduce un bruto anual válido, mayor que cero y de hasta 10.000.000 €.');
+  if (!Number.isFinite(bonus) || bonus < 0 || bonus > 10000000) return fail('Introduce un bonus válido entre 0 y 10.000.000 €.');
+  if (manualRate !== null && (!Number.isFinite(manualRate) || manualRate < 0 || manualRate > 100)) return fail('El IRPF manual debe estar entre 0 y 100 %.');
+  if (!Number.isInteger(children) || children < 0 || children > 16 || !Number.isInteger(youngChildren) || youngChildren < 0 || youngChildren > children) return fail('Revisa los hijos: de 0 a 16; los menores de 3 años no pueden superar el total.');
+  if (family === '1' && children === 0) return fail('La situación familiar con hijos solo a tu cargo requiere al menos un hijo menor.');
+  if (foral && manualRate === null) return fail('Para fiscalidad foral o especial, introduce el IRPF de tu nómina en los ajustes.');
+  const options = { gross, bonus, payments: Number(byId('salary-payments').value), extraMonths: salaryExtraMonths, contract: byId('salary-contract').value, children, youngChildren, childShare: Number(byId('salary-child-share').value), family, group: byId('salary-group').value, manualRate };
+  const result = calculateSalaryScenario(options);
+  const withoutBonus = result.fixedSalary || result;
+  const bonusMonth = Number(byId('salary-bonus-month').value);
+  const calendar = buildSalaryCalendar(result, bonusMonth);
+  const ordinaryMonth = calendar[0];
+  byId('salary-results').hidden = false;
+  byId('salary-monthly').textContent = euro.format(ordinaryMonth.ordinary);
+  byId('salary-pay-summary').textContent = options.payments === 14 ? '12 nóminas + 2 extras' : '12 nóminas iguales';
+  byId('salary-rate').textContent = `${salaryPercent(result.rate)}${manualRate !== null ? ' · manual' : ' · estimado'}`;
+  byId('salary-annual').textContent = euro.format(result.annualNet);
+  byId('salary-total-gross').textContent = euro.format(result.totalGross);
+  byId('salary-without-bonus').textContent = euro.format(withoutBonus.annualNet);
+  byId('salary-average').textContent = euro.format(result.annualNet / 12);
+  byId('salary-extra-row').hidden = options.payments !== 14;
+  byId('salary-extra').textContent = euro.format(calendar.find((month) => month.extra !== 0)?.extra || 0);
+
+  const brackets = byId('salary-brackets');
+  brackets.replaceChildren();
+  brackets.hidden = foral;
+  const marginal = salaryRules.brackets[result.marginalIndex];
+  if (!foral) {
+    salaryRules.brackets.forEach((bracket, index) => {
+      const segment = document.createElement('div');
+      segment.className = `salary-bracket${index === result.marginalIndex ? ' current' : ''}`;
+      const rate = document.createElement('strong'); rate.textContent = salaryPercent(bracket.rate);
+      const range = document.createElement('span'); range.textContent = Number.isFinite(bracket.to) ? `Hasta ${euro.format(bracket.to)}` : 'Más de 300.000 €';
+      const marker = document.createElement('span'); marker.className = 'salary-bracket-marker'; marker.textContent = index === result.marginalIndex ? 'Tu tramo' : '\u00a0';
+      segment.append(rate, range, marker); brackets.append(segment);
+    });
+    brackets.setAttribute('aria-label', `Base de retención ${euro.format(result.base)}; tramo marginal ${salaryPercent(marginal.rate)}.`);
+  }
+  byId('salary-marginal').textContent = foral ? 'IRPF manual' : `${salaryPercent(marginal.rate)} marginal`;
+  byId('salary-bracket-caption').textContent = foral ? 'La escala común no corresponde a tu régimen. Se utiliza únicamente el porcentaje manual; consulta los tramos de tu administración tributaria.' : `Base estimada de retención del sueldo fijo: ${euro.format(result.base)}. Retención sobre el bruto fijo: ${salaryPercent(result.rate)}.${manualRate !== null ? ' El tramo se muestra como referencia de la escala común; has fijado la retención manualmente.' : ''}`;
+
+  const body = byId('salary-breakdown-body'); body.replaceChildren();
+  body.append(salaryTableRow(['Bruto anual total', 'Sueldo fijo + bonus', euro.format(result.totalGross)]));
+  result.contributions.forEach((item) => body.append(salaryTableRow([item.label, item.rate === null ? '0,19 / 0,21 / 0,24 % del exceso' : `${salaryPercent(item.rate)} de la base`, `−${euro.format(item.annual)}`])));
+  body.append(salaryTableRow(['Total Seguridad Social', 'Cotizaciones del trabajador', `−${euro.format(result.socialSecurity)}`], 'salary-subtotal'));
+  body.append(salaryTableRow(['IRPF del sueldo fijo', `${salaryPercent(result.rate)} del bruto fijo`, `−${euro.format(withoutBonus.tax)}`]));
+  if (bonus > 0) body.append(salaryTableRow(['IRPF del bonus', `${salaryPercent(result.bonusRate)} del bonus`, `−${euro.format(result.bonusTax)}`]));
+  body.append(salaryTableRow(['Neto anual', 'Lo que recibes', euro.format(result.annualNet)], 'salary-net-row'));
+  byId('salary-base-note').textContent = `Base mensual de cotización del sueldo fijo: ${euro.format(result.monthlyBase)}. Incluye la prorrata de extras; máximo ${euro.format(salaryRules.maxMonthlyBase)}.${bonus > 0 ? ` El desglose anual incluye ${euro.format(result.bonusSocialSecurity)} de cotización adicional, descontada del bonus en esta simulación.` : ''}${gross / 12 < salaryRules.minimumBases[options.group] ? ' Se aplica la base mínima del grupo; para jornadas parciales o periodos inferiores al año, esta estimación puede no corresponder a tu nómina.' : ''}`;
+  const distribution = byId('salary-distribution'); distribution.replaceChildren();
+  const parts = [{ label: 'Neto', amount: result.annualNet, kind: 'net' }, { label: 'Seguridad Social', amount: result.socialSecurity, kind: 'social' }, { label: 'IRPF', amount: result.tax, kind: 'tax' }];
+  parts.forEach((part) => {
+    const segment = document.createElement('span'); segment.className = `salary-part salary-part-${part.kind}`;
+    segment.style.width = `${Math.max(0, part.amount / result.totalGross * 100)}%`;
+    segment.title = `${part.label}: ${euro.format(part.amount)}`; distribution.append(segment);
+  });
+  distribution.hidden = result.annualNet < 0;
+  distribution.setAttribute('aria-label', parts.map((part) => `${part.label}: ${euro.format(part.amount)}`).join('; '));
+
+  byId('salary-bonus-results').hidden = !bonusEnabled || bonus <= 0;
+  const bonusPayroll = calendar[bonusMonth - 1];
+  byId('salary-bonus-gain').textContent = euro.format(result.annualNet - withoutBonus.annualNet);
+  byId('salary-bonus-tax').textContent = `${euro.format(result.bonusTax)} · ${salaryPercent(result.bonusRate)}`;
+  byId('salary-bonus-month-net').textContent = `${euro.format(bonusPayroll.total)} · ${bonusPayroll.name}`;
+  byId('salary-bonus-impact').textContent = `Bonus bruto: ${euro.format(bonus)}. Se descuentan ${euro.format(result.bonusTax)} de IRPF y ${euro.format(result.bonusSocialSecurity)} de cotizaciones al cobrarlo en ${bonusPayroll.name.toLowerCase()}. Las deducciones del bonus se estiman como la diferencia entre el cálculo anual con bonus y el cálculo del sueldo fijo. La nómina habitual y las extras mantienen sus importes.`;
+  const calendarBody = byId('salary-calendar-body'); calendarBody.replaceChildren();
+  calendar.forEach((month) => calendarBody.append(salaryTableRow([month.name, euro.format(month.ordinary), month.extra ? euro.format(month.extra) : '—', month.bonus ? euro.format(month.bonus) : '—', euro.format(month.total)], month.bonus ? 'salary-bonus-month' : '')));
+  byId('salary-calendar-total').textContent = euro.format(result.annualNet);
+}
+
 function activateMainTab(tabName) {
-  const mortgageActive = tabName === 'mortgage';
-  byId('portfolio-view').hidden = mortgageActive;
-  byId('mortgage-view').hidden = !mortgageActive;
-  byId('tab-patrimonio').classList.toggle('active', !mortgageActive);
-  byId('tab-hipotecas').classList.toggle('active', mortgageActive);
-  byId('tab-patrimonio').setAttribute('aria-selected', String(!mortgageActive));
-  byId('tab-hipotecas').setAttribute('aria-selected', String(mortgageActive));
+  [['portfolio', 'portfolio-view', 'tab-patrimonio'], ['mortgage', 'mortgage-view', 'tab-hipotecas'], ['salary', 'salary-view', 'tab-sueldo']].forEach(([name, panelId, tabId]) => {
+    const active = tabName === name;
+    byId(panelId).hidden = !active;
+    byId(tabId).classList.toggle('active', active);
+    byId(tabId).setAttribute('aria-selected', String(active));
+  });
 }
 
 byId('tab-patrimonio').addEventListener('click', () => activateMainTab('portfolio'));
 byId('tab-hipotecas').addEventListener('click', () => activateMainTab('mortgage'));
+byId('tab-sueldo').addEventListener('click', () => activateMainTab('salary'));
+document.querySelectorAll('[data-salary-input]').forEach((input) => input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', renderSalary));
+byId('salary-bonus-enabled').addEventListener('change', renderSalary);
+['salary-gross', 'salary-bonus', 'salary-irpf-override'].forEach((id) => {
+  const input = byId(id);
+  input.addEventListener('focus', () => {
+    const value = readSalaryNumber(input.value);
+    if (value !== null && Number.isFinite(value)) input.value = formatMortgageInput(value, 2, false);
+  });
+  input.addEventListener('blur', () => {
+    const value = readSalaryNumber(input.value);
+    if (value !== null && Number.isFinite(value)) input.value = formatMortgageInput(value, 2, id !== 'salary-irpf-override');
+  });
+});
+bindSalaryExtraMonths();
+bindSalaryMonthButtons('salary-bonus-months', 'cobro del bonus', (month) => {
+  byId('salary-bonus-month').value = String(month);
+  renderSalary();
+});
+renderSalary();
 byId('mortgage-price').addEventListener('input', () => {
   if (downPaymentMode === 'percent') updateDownPaymentFromPercent();
   else updateDownPaymentFromAmount();
@@ -998,4 +1467,6 @@ byId('mortgage-region').addEventListener('change', calculateMortgage);
 byId('mortgage-property-type').addEventListener('change', calculateMortgage);
 
 calculateMortgage();
+const chartResizeObserver = new ResizeObserver(() => renderChart());
+chartResizeObserver.observe(byId('chart-wrap'));
 initializePortfolios().catch((error) => showToast(error.message));

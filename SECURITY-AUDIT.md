@@ -4,7 +4,25 @@ Fecha: 4 de octubre de 2026.
 
 Revisión previa al commit: 6 de octubre de 2026.
 
-## Revisión de arquitectura previa al commit
+## Revisión actual: 12 de octubre de 2026
+
+Resultado: no se identificaron hallazgos bloqueantes para los cambios actuales bajo el modelo de aplicación local personal en un equipo de confianza. Se revisaron los 27 archivos versionados o nuevos candidatos a commit, incluidos el catálogo de activos, la calculadora salarial, los recursos de marca y las pruebas. El índice no contiene cambios preparados: el visto bueno corresponde a los archivos actuales, no a un commit ya creado.
+
+Validación completada:
+
+- **43 pruebas superadas**, incluyendo regresiones adicionales de inyección de HTML en alias, tipos, nombres de campos y valores, y controles de la API de activos. Los textos se muestran escapados o mediante APIs de texto; las pruebas no consiguieron insertar nodos ni ejecutar el contenido introducido.
+- La API de activos rechaza escrituras sin origen/token válidos, variantes de mayúsculas con origen ajeno, Host incorrecto, tipos de contenido no admitidos, UTF-8 inválido, arrays en la raíz y cuerpos mayores del límite. Las escrituras rechazadas conservan el catálogo anterior. Se verificaron además las validaciones de campos y los controles existentes de importaciones y carteras.
+- Sintaxis PowerShell válida, `git diff --check` sin errores, escáner de índice y copia de trabajo sin coincidencias, hook pre-commit activo y ejecutado correctamente.
+- `.data/`, los CSV originales, `CONTEXT.md`, entornos y credenciales siguen excluidos. No se encontraron rutas privadas ya versionadas ni forzadas en el índice. Los datos de carteras y el catálogo permanecen fuera de los archivos candidatos.
+- Se compararon cinco archivos locales JSON/CSV con los candidatos y contenidos históricos, sin coincidencias de datos privados ni registros de operaciones serializados. La única coincidencia completa fue una plantilla de cartera vacía incluida en el código del servidor.
+- Los diez recursos PNG/ICO no contienen EXIF ni bloques de texto de metadatos. Las guías de marca contienen documentación y prompts de diseño, sin datos personales detectados.
+- La calculadora salarial trabaja en memoria; sus entradas no se guardan ni se envían a la API. Las llamadas de datos de la app siguen dirigidas al servidor local. Los enlaces a AEAT y BOE son enlaces de consulta, con `noopener noreferrer`.
+
+Límite de la comprobación histórica: `python tools/check_secrets.py --all` no puede completar `git rev-list --all` porque existe una referencia interna dañada bajo `refs/codex/turn-diffs/checkpoints/`. No se modificaron las referencias de Git. Como alternativa se enumeró el historial con `git rev-list --branches --tags --remotes HEAD` y se analizaron sus tres commits y 22 blobs, sin secretos ni rutas privadas. Esto cubre el historial disponible de ramas, etiquetas y referencias remotas locales; no certifica las referencias internas dañadas ni consulta el servidor remoto.
+
+No se prepararon archivos, creó un commit ni publicó contenido. El hook volverá a revisar el índice real al hacer el commit. El escáner usa patrones y no ofrece una garantía absoluta sobre cualquier dato sensible. Se mantiene el límite de confianza de la aplicación: loopback y protección de origen/CSRF, sin autenticación entre usuarios o procesos locales ni cifrado de los archivos financieros.
+
+## Revisión de arquitectura previa al commit (6 de octubre de 2026)
 
 Resultado: no se identificaron bloqueos de seguridad pendientes para versionar los cambios actuales, bajo el modelo de aplicación local personal. Se revisaron los 13 archivos candidatos a commit, las fronteras entre navegador, API, disco y Git, los cambios de interfaz y la configuración de CI. No había cambios preparados en el índice.
 

@@ -8,6 +8,7 @@ $dataDirectory = Join-Path $root '.data'
 $legacyDataFile = Join-Path $dataDirectory 'portfolio.json'
 $portfolioDirectory = Join-Path $dataDirectory 'portfolios'
 $portfolioIndexFile = Join-Path $dataDirectory 'portfolios.json'
+$assetMetadataFile = Join-Path $dataDirectory 'assets.json'
 $listener = New-Object System.Net.HttpListener
 $prefix = "http://127.0.0.1:$Port/"
 $expectedOrigin = ([uri]$prefix).GetLeftPart([System.UriPartial]::Authority)
@@ -53,7 +54,7 @@ function Read-RequestBody($Request, [int]$Limit) {
 
 function Assert-ObjectShape($Value, [string[]]$Required, [string[]]$Allowed) {
     if ($Value -isnot [pscustomobject]) { throw 'A JSON object is required.' }
-    $names = @($Value.PSObject.Properties.Name)
+    $names = @($Value.PSObject.Properties | ForEach-Object { $_.Name })
     foreach ($name in $Required) {
         if ($names -cnotcontains $name) { throw 'A required property is missing.' }
     }
@@ -124,6 +125,36 @@ function Assert-PortfolioData($Data) {
     if (@($Data.PSObject.Properties.Name) -ccontains 'settings') {
         Assert-ObjectShape $Data.settings @('target') @('target')
         Assert-Number $Data.settings.target
+    }
+}
+
+function Assert-AssetText($Value, [int]$Limit, [bool]$Required = $false) {
+    if ($Value -isnot [string] -or $Value.Length -gt $Limit -or $Value -match '[\x00-\x1F\x7F]' -or
+        ($Required -and $Value.Trim().Length -eq 0)) { throw 'Invalid asset metadata text.' }
+}
+
+function Assert-AssetMetadata($Data) {
+    Assert-ObjectShape $Data @('fields', 'assets') @('fields', 'assets')
+    if ($Data.fields -isnot [array] -or $Data.fields.Count -gt 20) { throw 'Invalid custom fields array.' }
+    $fieldNames = @()
+    foreach ($field in $Data.fields) {
+        Assert-AssetText $field 48 $true
+        if ($field -ne $field.Trim() -or $fieldNames -contains $field -or
+            @('ticker', 'alias', 'acronimo', ('acr' + [char]0xF3 + 'nimo'), ('alias / acr' + [char]0xF3 + 'nimo'), 'tipo', 'tipo de activo', '__proto__', 'constructor', 'prototype') -contains $field) {
+            throw 'Invalid or duplicate custom field.'
+        }
+        $fieldNames += $field
+    }
+    Assert-ObjectShape $Data.assets @() @($Data.assets.PSObject.Properties.Name)
+    if (@($Data.assets.PSObject.Properties).Count -gt 2000) { throw 'Too many asset metadata records.' }
+    foreach ($asset in $Data.assets.PSObject.Properties) {
+        Assert-Symbol $asset.Name
+        if ($asset.Name -cne $asset.Name.ToUpperInvariant()) { throw 'Metadata tickers must be uppercase.' }
+        Assert-ObjectShape $asset.Value @('alias', 'type', 'values') @('alias', 'type', 'values')
+        Assert-AssetText $asset.Value.alias 80
+        Assert-AssetText $asset.Value.type 48
+        Assert-ObjectShape $asset.Value.values @() $fieldNames
+        foreach ($value in $asset.Value.values.PSObject.Properties) { Assert-AssetText $value.Value 500 }
     }
 }
 
@@ -213,6 +244,24 @@ try {
             if ($path -eq '/api/session' -and $request.HttpMethod -eq 'GET') {
                 $bytes = [System.Text.Encoding]::UTF8.GetBytes((@{ csrfToken = $csrfToken } | ConvertTo-Json -Compress))
                 Write-Response $response 200 'application/json; charset=utf-8' $bytes
+                continue
+            }
+
+            if ($path -eq '/api/assets' -and $request.HttpMethod -eq 'GET') {
+                $bytes = if (Test-Path -LiteralPath $assetMetadataFile) { [System.IO.File]::ReadAllBytes($assetMetadataFile) }
+                    else { [System.Text.Encoding]::UTF8.GetBytes('{"fields":[],"assets":{}}') }
+                Write-Response $response 200 'application/json; charset=utf-8' $bytes
+                continue
+            }
+
+            if ($path -eq '/api/assets' -and $request.HttpMethod -eq 'POST') {
+                $body = Read-RequestBody $request $maxBodyBytes
+                $metadata = ConvertFrom-Json -InputObject $body
+                Assert-AssetMetadata $metadata
+                $temporaryFile = "$assetMetadataFile.tmp"
+                [System.IO.File]::WriteAllText($temporaryFile, ($metadata | ConvertTo-Json -Depth 8 -Compress), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+                Move-Item -LiteralPath $temporaryFile -Destination $assetMetadataFile -Force
+                Write-Response $response 200 'application/json; charset=utf-8' ([System.Text.Encoding]::UTF8.GetBytes('{"saved":true}'))
                 continue
             }
 
@@ -315,6 +364,9 @@ try {
                 '/' { Join-Path $root 'index.html' }
                 '/app.js' { Join-Path $root 'app.js' }
                 '/styles.css' { Join-Path $root 'styles.css' }
+                '/assets/bradtrack-mark.png' { Join-Path $root 'assets/bradtrack-mark.png' }
+                '/assets/bradtrack-favicon-32.png' { Join-Path $root 'assets/bradtrack-favicon-32.png' }
+                '/favicon.ico' { Join-Path $root 'assets/favicon.ico' }
                 default { $null }
             }
             if ($null -eq $file -or -not (Test-Path $file)) {
@@ -322,7 +374,7 @@ try {
                 continue
             }
 
-            $contentType = if ($file.EndsWith('.html')) { 'text/html; charset=utf-8' } elseif ($file.EndsWith('.js')) { 'text/javascript; charset=utf-8' } else { 'text/css; charset=utf-8' }
+            $contentType = if ($file.EndsWith('.html')) { 'text/html; charset=utf-8' } elseif ($file.EndsWith('.js')) { 'text/javascript; charset=utf-8' } elseif ($file.EndsWith('.png')) { 'image/png' } elseif ($file.EndsWith('.ico')) { 'image/x-icon' } else { 'text/css; charset=utf-8' }
             Write-Response $response 200 $contentType ([System.IO.File]::ReadAllBytes($file))
         }
         catch {

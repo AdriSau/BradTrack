@@ -5,14 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f6f1">
   <title>BradTrack | Patrimonio</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=3">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/bradtrack-favicon-32.png?v=3">
+  <link rel="apple-touch-icon" href="/assets/bradtrack-mark.png?v=3">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="BradTrack, inicio">
-      <span class="brand-mark" aria-hidden="true">B</span>
-      <span>BradTrack</span>
+      <span class="brand-mark" aria-hidden="true"><img src="/assets/bradtrack-mark.png?v=3" width="28" height="28" alt=""></span>
+      <span class="brand-name">BradTrack</span>
     </a>
     <div class="top-actions">
       <span class="local-status"><span class="status-dot"></span>Solo en este dispositivo</span>
@@ -26,6 +29,7 @@
     <nav class="section-nav" role="tablist" aria-label="Secciones principales">
       <button class="nav-link active" id="tab-patrimonio" type="button" role="tab" aria-selected="true" aria-controls="portfolio-view">Patrimonio</button>
       <button class="nav-link" id="tab-hipotecas" type="button" role="tab" aria-selected="false" aria-controls="mortgage-view">Hipotecas</button>
+      <button class="nav-link" id="tab-sueldo" type="button" role="tab" aria-selected="false" aria-controls="salary-view">Sueldo neto</button>
     </nav>
 
     <div id="portfolio-view" role="tabpanel" aria-labelledby="tab-patrimonio">
@@ -44,6 +48,10 @@
         <button class="button button-quiet" id="create-portfolio" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           Nuevo portfolio
+        </button>
+        <button class="button button-quiet" id="manage-assets" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg>
+          Datos de activos
         </button>
         <button class="button button-quiet" id="import-transactions" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
@@ -214,10 +222,128 @@
         <p class="mortgage-disclaimer">Simulación informativa con sistema francés. El 80% de financiación y el 35% de esfuerzo son referencias orientativas, no requisitos legales ni una promesa de concesión. Los impuestos se estiman con tipos generales y pueden variar por tramos, bonificaciones y circunstancias personales.</p>
       </section>
     </section>
+    <section id="salary-view" class="mortgage-view salary-view" role="tabpanel" aria-labelledby="tab-sueldo" hidden>
+      <header class="mortgage-heading">
+        <p class="eyebrow">TU NÓMINA · ESPAÑA · 2026</p>
+        <h1>Del bruto al <span>neto.</span></h1>
+        <p class="mortgage-intro">Tu sueldo, sus cotizaciones y lo que te queda. Solo necesitas el bruto anual y el número de pagas.</p>
+      </header>
+
+      <section class="panel mortgage-form-panel" aria-labelledby="salary-inputs-title">
+        <div class="panel-heading"><div><p class="eyebrow">CALCULADORA</p><h2 id="salary-inputs-title">Datos del sueldo</h2></div><span class="count-pill">Ejercicio 2026</span></div>
+        <div class="mortgage-form-grid salary-basic-grid">
+          <label>Bruto anual fijo, sin bonus
+            <span class="input-with-suffix"><input id="salary-gross" data-salary-input type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 35.000" aria-describedby="salary-defaults"><span>€</span></span>
+          </label>
+          <div class="salary-payments-field">
+            <label>Número de pagas<select id="salary-payments" data-salary-input><option value="12">12 pagas · extras prorrateadas</option><option value="14">14 pagas · 12 nóminas + 2 extras</option></select></label>
+            <div id="salary-extra-months" class="salary-months" role="group" aria-label="Meses de las dos pagas extra" aria-describedby="salary-extra-months-note"></div>
+            <p id="salary-extra-months-note" class="salary-note" aria-live="polite"></p>
+          </div>
+        </div>
+        <p class="salary-note" id="salary-defaults">Por defecto: contrato indefinido, menor de 65 años, sin hijos, régimen general y fiscalidad común. Año completo de trabajo.</p>
+        <details class="salary-settings">
+          <summary>Ajustes personales y de nómina</summary>
+          <div class="mortgage-form-grid">
+            <label>Contrato<select id="salary-contract" data-salary-input><option value="permanent">Indefinido</option><option value="temporary">Temporal de un año o más</option><option value="short">Temporal de menos de un año · IRPF mínimo 2%</option></select></label>
+            <label>Situación familiar<select id="salary-family" data-salary-input><option value="3">Soltero/a o pareja con ingresos</option><option value="2">Casado/a · cónyuge con rentas ≤ 1.500 €/año</option><option value="1">Sin cónyuge · hijos menores solo a mi cargo</option></select></label>
+            <label>Hijos con derecho a mínimo familiar<input id="salary-children" data-salary-input type="number" min="0" max="16" step="1" value="0"></label>
+            <label>De ellos, menores de 3 años<input id="salary-young-children" data-salary-input type="number" min="0" max="16" step="1" value="0"></label>
+            <label>Mínimo por hijos<select id="salary-child-share" data-salary-input><option value="0.5">Compartido con el otro progenitor · 50%</option><option value="1">Solo me corresponde a mí · 100%</option></select></label>
+            <label>Grupo de cotización<select id="salary-group" data-salary-input><option value="4">Grupos 4 a 11 · base mínima general</option><option value="1">Grupo 1 · licenciados e ingenieros</option><option value="2">Grupo 2 · técnicos titulados</option><option value="3">Grupo 3 · jefes administrativos o de taller</option></select></label>
+            <label>Fiscalidad<select id="salary-territory" data-salary-input><option value="common">Régimen común</option><option value="manual">Navarra, País Vasco o régimen especial · IRPF manual</option></select></label>
+            <label>IRPF de tu nómina (opcional)
+              <span class="input-with-suffix"><input id="salary-irpf-override" data-salary-input type="text" inputmode="decimal" autocomplete="off" placeholder="Automático" aria-describedby="salary-manual-note"><span>%</span></span>
+            </label>
+          </div>
+          <p class="salary-note">Cuenta los hijos menores de 25 años que conviven contigo, con rentas anuales ≤ 8.000 € y que no presentan declaración con rentas superiores a 1.800 €. Se supone el mismo reparto para todos. Sin discapacidad, ascendientes ni otras reducciones especiales.</p>
+          <p class="salary-note" id="salary-manual-note">El IRPF manual sustituye la estimación automática en sueldo y bonus. Para fiscalidad foral o especial, introduce el porcentaje de tu nómina.</p>
+        </details>
+      </section>
+
+      <section class="panel mortgage-form-panel" aria-labelledby="salary-bonus-title">
+        <div class="panel-heading"><div><p class="eyebrow">RETRIBUCIÓN VARIABLE</p><h2 id="salary-bonus-title">Bonus opcional</h2></div><label class="salary-toggle"><input id="salary-bonus-enabled" type="checkbox">Incluir bonus</label></div>
+        <div id="salary-bonus-fields">
+          <div class="mortgage-form-grid salary-basic-grid">
+            <label>Bonus bruto anual adicional<span class="input-with-suffix"><input id="salary-bonus" data-salary-input type="text" inputmode="decimal" autocomplete="off" placeholder="Ej. 5.000" disabled><span>€</span></span></label>
+            <div class="salary-payments-field">
+              <span id="salary-bonus-months-label" class="salary-field-label">Mes de cobro</span>
+              <input id="salary-bonus-month" type="hidden" value="6">
+              <div id="salary-bonus-months" class="salary-months salary-bonus-months" role="group" aria-labelledby="salary-bonus-months-label" aria-describedby="salary-bonus-months-note"></div>
+              <p id="salary-bonus-months-note" class="salary-note" aria-live="polite"></p>
+            </div>
+          </div>
+          <div id="salary-bonus-assumption" hidden>
+          <p class="salary-note">Bonus separado del sueldo fijo. En esta simulación, su IRPF y cotización adicional se descuentan del propio bonus en el mes de cobro. La nómina habitual, las extras y su porcentaje de retención se calculan solo con el sueldo fijo.</p>
+          <p class="salary-note">Las deducciones del bonus se estiman por el incremento del cálculo anual al añadirlo. Es una simulación de cobro separado; la empresa puede distribuir las cotizaciones y regularizar el IRPF de otra forma.</p>
+          </div>
+        </div>
+      </section>
+
+      <p id="salary-error" class="form-error" role="alert"></p>
+      <p id="salary-empty" class="salary-note">Introduce tu bruto anual para ver el sueldo neto.</p>
+      <div id="salary-results" hidden>
+        <div class="mortgage-hero-grid salary-hero-grid" aria-live="polite" aria-atomic="true">
+          <section class="panel mortgage-payment" aria-label="Nómina habitual neta estimada">
+            <p class="metric-label">NÓMINA HABITUAL NETA</p><strong id="salary-monthly">—</strong>
+            <div class="mortgage-payment-meta"><span>Distribución<b id="salary-pay-summary">—</b></span><span>IRPF del sueldo fijo<b id="salary-rate">—</b></span></div>
+            <p class="salary-note">Sin bonus ni paga extra del mes.</p>
+          </section>
+          <section class="panel salary-summary" aria-label="Resumen anual">
+            <p class="eyebrow">LO QUE RECIBES EN EL AÑO</p><h2 id="salary-annual">—</h2>
+            <dl class="salary-summary-list"><div><dt>Bruto total, con bonus</dt><dd id="salary-total-gross">—</dd></div><div><dt>Neto anual sin bonus</dt><dd id="salary-without-bonus">—</dd></div><div><dt>Media neta por mes (anual / 12)</dt><dd id="salary-average">—</dd></div><div id="salary-extra-row" hidden><dt>Cada paga extra neta</dt><dd id="salary-extra">—</dd></div></dl>
+          </section>
+        </div>
+
+        <section class="panel salary-tax-panel" aria-labelledby="salary-tax-title">
+          <div class="panel-heading"><div><p class="eyebrow">IRPF PROGRESIVO · SUELDO FIJO</p><h2 id="salary-tax-title">Tu tramo de retención</h2></div><span class="count-pill" id="salary-marginal">—</span></div>
+          <div id="salary-brackets" class="salary-brackets" role="img" aria-label="Tramos de la escala de retención del IRPF"></div>
+          <p id="salary-bracket-caption" class="salary-note"></p>
+          <p class="salary-note">El porcentaje del tramo se aplica solo a la parte de la base que cae en él. La retención sobre tu bruto tiene en cuenta mínimos y reducciones; la declaración de la renta puede dar un resultado diferente.</p>
+        </section>
+
+        <section class="panel salary-breakdown" aria-labelledby="salary-breakdown-title">
+          <div class="panel-heading"><div><p class="eyebrow">APORTACIONES DEL TRABAJADOR</p><h2 id="salary-breakdown-title">Del bruto al bolsillo</h2></div><span class="count-pill">Total anual</span></div>
+          <div id="salary-distribution" class="salary-distribution" role="img" aria-label="Reparto del sueldo bruto"></div>
+          <div class="table-scroll"><table><thead><tr><th>Concepto</th><th>Tipo / base</th><th>Importe anual</th></tr></thead><tbody id="salary-breakdown-body"></tbody></table></div>
+          <p id="salary-base-note" class="salary-note"></p>
+          <p class="salary-note">Las pagas extra ya cotizan dentro de las 12 nóminas habituales. En 14 pagas se consideran extras iguales, cobradas en los dos meses que elijas, con IRPF y sin una nueva deducción de Seguridad Social.</p>
+        </section>
+
+        <section id="salary-bonus-results" class="panel salary-bonus-summary" aria-labelledby="salary-bonus-results-title" hidden>
+          <div class="panel-heading"><div><p class="eyebrow">EFECTO DEL BONUS</p><h2 id="salary-bonus-results-title">Tu ingreso adicional</h2></div></div>
+          <dl class="salary-bonus-metrics"><div><dt>Bonus neto · aumento del neto anual</dt><dd id="salary-bonus-gain">—</dd></div><div><dt>IRPF del bonus</dt><dd id="salary-bonus-tax">—</dd></div><div><dt>Total neto en el mes de cobro</dt><dd id="salary-bonus-month-net">—</dd></div></dl>
+          <p id="salary-bonus-impact" class="salary-note"></p>
+        </section>
+
+        <section class="panel salary-calendar" aria-labelledby="salary-calendar-title">
+          <div class="panel-heading"><div><p class="eyebrow">DISTRIBUCIÓN DEL AÑO</p><h2 id="salary-calendar-title">Lo que cobras cada mes</h2></div></div>
+          <div class="table-scroll"><table><thead><tr><th>Mes</th><th>Nómina neta</th><th>Extra neta</th><th>Bonus neto</th><th>Total neto</th></tr></thead><tbody id="salary-calendar-body"></tbody><tfoot><tr><th>Total anual</th><td colspan="3"></td><td id="salary-calendar-total">—</td></tr></tfoot></table></div>
+        </section>
+      </div>
+      <footer class="mortgage-disclaimer salary-sources">Estimación de nómina de 2026 para trabajadores por cuenta ajena. Las retenciones reales pueden variar por regularizaciones, convenio y circunstancias personales. Cálculo local, sin guardar los datos. Fuentes: <a href="https://sede.agenciatributaria.gob.es/Sede/Retenciones.shtml" target="_blank" rel="noopener noreferrer">Agencia Tributaria · retenciones 2026</a> y <a href="https://www.boe.es/eli/es/o/2026/03/30/pjc297" target="_blank" rel="noopener noreferrer">BOE · cotizaciones 2026</a>.</footer>
+    </section>
   </main>
 
   <input id="transaction-file" type="file" accept=".csv,text/csv" hidden>
   <input id="history-files" type="file" accept=".csv,text/csv" multiple hidden>
+
+  <dialog id="assets-dialog" class="dialog assets-dialog" aria-labelledby="assets-title" aria-describedby="assets-description">
+    <form id="assets-form">
+      <div class="dialog-heading"><div><p class="eyebrow">CATÁLOGO COMPARTIDO</p><h2 id="assets-title">Datos de activos</h2></div><button class="icon-button assets-close" type="button" aria-label="Cerrar">&times;</button></div>
+      <p class="assets-description" id="assets-description">Una fila por ticker de todos los portfolios, incluidas posiciones vendidas y activos con históricos. El alias o acrónimo sustituye al nombre del activo en las vistas. El ticker se conserva como identificador.</p>
+      <div class="assets-toolbar">
+        <span class="count-pill" id="assets-count">0 activos</span>
+        <label for="asset-field-name">Nuevo campo<input id="asset-field-name" type="text" maxlength="48" autocomplete="off" placeholder="Ej. Sector o divisa"></label>
+        <button class="button button-quiet" id="add-asset-field" type="button">Añadir campo</button>
+      </div>
+      <div class="table-wrap assets-table-wrap"><table class="assets-table" aria-label="Datos de todos los activos"><thead id="assets-head"></thead><tbody id="assets-body"></tbody></table></div>
+      <p class="table-empty" id="assets-empty">Importa o registra operaciones para añadir activos al catálogo.</p>
+      <datalist id="asset-types"><option value="Renta fija"><option value="Renta variable"><option value="Commodities"><option value="Cash"><option value="Inmobiliario"><option value="Criptoactivos"><option value="Otros"></datalist>
+      <p class="form-error" id="assets-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button button-quiet assets-close" type="button">Cancelar</button><button class="button button-primary" id="save-assets" type="submit">Guardar cambios</button></div>
+    </form>
+  </dialog>
 
   <dialog id="portfolio-dialog" class="dialog compact-dialog">
     <form id="portfolio-form" method="dialog">
@@ -261,6 +387,7 @@
     <form id="quote-form" method="dialog">
       <div class="dialog-heading"><div><p class="eyebrow">COTIZACION</p><h2>Actualizar precio</h2></div><button class="icon-button quote-close" type="button" aria-label="Cerrar">&times;</button></div>
       <input name="symbol" type="hidden">
+      <p class="assets-description" id="quote-asset-name"></p>
       <label>Precio actual<input name="price" type="number" min="0" step="any" required></label>
       <div class="dialog-actions"><button class="button button-quiet quote-close" type="button">Cancelar</button><button class="button button-primary" type="submit">Actualizar</button></div>
     </form>

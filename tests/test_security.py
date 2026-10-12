@@ -42,6 +42,10 @@ class ServerSecurityTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         for name in ("Start-BradTrack.ps1", "index.html", "app.js", "styles.css"):
             shutil.copy2(ROOT / name, cls.test_root / name)
+        (cls.test_root / "assets").mkdir()
+        shutil.copy2(ROOT / "assets/bradtrack-mark.png", cls.test_root / "assets/bradtrack-mark.png")
+        for name in ("favicon.ico", "bradtrack-favicon-32.png"):
+            shutil.copy2(ROOT / "assets" / name, cls.test_root / "assets" / name)
         with socket.socket() as sock:
             for port in range(18766, 18866):
                 try:
@@ -129,8 +133,78 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertTrue(import_path.is_relative_to(self.test_root / ".data/imports"))
         self.assertEqual(import_path.read_text(), "Symbol,Quantity\nTEST,2\n")
 
+    def test_asset_metadata_roundtrip_and_portfolio_independence(self):
+        metadata = {"fields": ["Sector", "Divisa"], "assets": {
+            "TEST": {"alias": "Mi inversión", "type": "Renta variable",
+                     "values": {"Sector": "Tecnología", "Divisa": "EUR"}},
+            "TEST2": {"alias": "Mi inversión", "type": "Cash", "values": {}}}}
+        before = self.data_file.read_bytes()
+        self.assertEqual(self.post("/api/assets", metadata)[0], 200)
+        status, headers, body = self.request("GET", "/api/assets")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(json.loads(body), metadata)
+        stored = self.test_root / ".data/assets.json"
+        self.assertEqual(json.loads(stored.read_text(encoding="utf-8")), metadata)
+        self.assertEqual(self.data_file.read_bytes(), before)
+        self.assertEqual(self.post("/api/assets", {"fields": [], "assets": {}})[0], 200)
+        self.assertEqual(json.loads(self.request("GET", "/api/assets")[2]), {"fields": [], "assets": {}})
+
+    def test_asset_metadata_validation_preserves_saved_data(self):
+        valid = {"fields": ["Sector"], "assets": {
+            "TEST": {"alias": "Alias", "type": "Renta fija", "values": {"Sector": "Otro"}}}}
+        self.assertEqual(self.post("/api/assets", valid)[0], 200)
+        stored = self.test_root / ".data/assets.json"
+        before = stored.read_bytes()
+        invalid = [[], {"fields": "Sector", "assets": {}},
+                   {"fields": ["Sector", "sector"], "assets": {}},
+                   {"fields": [""], "assets": {}},
+                   {"fields": ["constructor"], "assets": {}},
+                   {"fields": ["X" * 49], "assets": {}},
+                   {"fields": [f"Field{i}" for i in range(21)], "assets": {}},
+                   {"fields": [], "assets": {"../x": valid["assets"]["TEST"]}},
+                   {"fields": [], "assets": {"test": valid["assets"]["TEST"]}}]
+        for field, value in [("alias", 123), ("alias", "x" * 81), ("type", "x" * 49),
+                             ("alias", "bad\ntext"), ("values", {"Unknown": "x"}),
+                             ("values", {"Sector": "x" * 501}), ("values", {"Sector": []})]:
+            case = copy.deepcopy(valid)
+            case["assets"]["TEST"][field] = value
+            invalid.append(case)
+        for metadata in invalid:
+            with self.subTest(metadata=metadata):
+                self.assertEqual(self.post("/api/assets", metadata)[0], 400)
+                self.assertEqual(stored.read_bytes(), before)
+
+    def test_asset_endpoint_security_and_rejected_writes_preserve_catalog(self):
+        metadata = {"fields": [], "assets": {}}
+        self.assertEqual(self.post("/api/assets", metadata)[0], 200)
+        stored = self.test_root / ".data/assets.json"
+        before = stored.read_bytes()
+        foreign = {"Content-Type": "text/plain", "Origin": "http://untrusted.example",
+                   "Sec-Fetch-Site": "cross-site"}
+        for prefix in ("/api", "/API", "/Api", "/aPi"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.post(prefix + "/assets", metadata, foreign)[0], 403)
+                self.assertEqual(self.request("GET", prefix + "/assets", headers=foreign)[0], 403)
+        headers = self.write_headers()
+        headers["Host"] = "untrusted.example"
+        self.assertEqual(self.post("/api/assets", metadata, headers)[0], 403)
+        headers = self.write_headers()
+        headers["Content-Type"] = "text/plain"
+        self.assertEqual(self.post("/api/assets", metadata, headers)[0], 415)
+        self.assertEqual(self.request("POST", "/api/assets", b"\xff", self.write_headers())[0], 400)
+        self.assertEqual(self.post("/api/assets", [metadata])[0], 400)
+        headers = self.write_headers()
+        headers["Content-Length"] = str(15 * 1024 * 1024 + 1)
+        self.assertEqual(self.request("POST", "/api/assets", b"", headers)[0], 413)
+        self.assertEqual(self.request("OPTIONS", "/api/assets", headers={
+            "Origin": self.origin})[0], 405)
+        self.assertEqual(stored.read_bytes(), before)
+        self.assertEqual(self.request("GET", "/api/assets")[0], 200)
+
     def test_all_write_endpoints_reject_foreign_or_missing_origin_and_token(self):
-        routes = [("/api/portfolios", {"alias": "Untrusted"}),
+        routes = [("/api/assets", {"fields": [], "assets": {}}),
+                  ("/api/portfolios", {"alias": "Untrusted"}),
                   ("/api/portfolios/default/data", VALID_DATA),
                   ("/api/portfolios/default/imports", {"name": "x.csv", "category": "history", "content": "x"})]
         before = self.data_file.read_bytes()
@@ -151,7 +225,7 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual((self.test_root / ".data/portfolios.json").read_bytes(), index)
 
     def test_session_and_reads_reject_foreign_origin(self):
-        for path in ("/api/session", "/api/portfolios", "/api/portfolios/default/data"):
+        for path in ("/api/session", "/api/assets", "/api/portfolios", "/api/portfolios/default/data"):
             self.assertEqual(self.request("GET", path, headers={"Origin": "http://untrusted.example"})[0], 403)
         self.assertEqual(self.request("OPTIONS", "/api/portfolios", headers={
             "Origin": "http://untrusted.example", "Access-Control-Request-Method": "POST"})[0], 403)
@@ -272,7 +346,18 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/api/portfolios")[0], 200)
 
     def test_private_paths_and_security_headers(self):
-        for path in ("/.data/portfolios.json", "/.git/config", "/resources/_test.csv", "/Start-BradTrack.ps1"):
+        status, headers, body = self.request("GET", "/assets/bradtrack-mark.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "image/png")
+        self.assertEqual(body, (ROOT / "assets/bradtrack-mark.png").read_bytes())
+        for path, name, content_type in (("/favicon.ico?v=3", "favicon.ico", "image/x-icon"),
+                                        ("/assets/bradtrack-favicon-32.png?v=3", "bradtrack-favicon-32.png", "image/png")):
+            status, headers, body = self.request("GET", path)
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Content-Type"], content_type)
+            self.assertEqual(body, (ROOT / "assets" / name).read_bytes())
+        self.assertEqual(self.request("GET", "/assets/BRAND.md")[0], 404)
+        for path in ("/.data/assets.json", "/.data/portfolios.json", "/.git/config", "/resources/_test.csv", "/Start-BradTrack.ps1"):
             self.assertEqual(self.request("GET", path)[0], 404)
         for path in ("/", "/api/session", "/api/portfolios/default/data"):
             status, headers, _ = self.request("GET", path)
